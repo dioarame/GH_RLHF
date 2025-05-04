@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grasshopper RLHF - 인간 피드백 수집 시스템</title>
+    
+    <!-- Favicon -->
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.min.js"></script>
+    
+    <!-- 커스텀 CSS -->
+    <link href="/static/css/styles.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 헤더 -->
+        <header class="app-header">
+            <nav class="navbar navbar-expand-lg navbar-dark">
+                <div class="container-fluid">
+                    <a class="navbar-brand" href="/">
+                        <i class="fa-solid fa-cube me-2"></i>
+                        Grasshopper RLHF
+                    </a>
+                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                        <span class="navbar-toggler-icon"></span>
+                    </button>
+                    <div class="collapse navbar-collapse" id="navbarNav">
+                        <ul class="navbar-nav me-auto">
+                            <li class="nav-item">
+                                <a class="nav-link active" href="#" id="nav-designs">
+                                    <i class="fa-solid fa-shapes me-1"></i> 디자인
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" id="nav-feedback">
+                                    <i class="fa-solid fa-comment me-1"></i> 피드백
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" href="#" id="nav-analysis">
+                                    <i class="fa-solid fa-chart-line me-1"></i> 분석
+                                </a>
+                            </li>
+                        </ul>
+                        <div class="d-flex">
+                            <button class="btn btn-outline-light" type="button" id="btn-refresh">
+                                <i class="fa-solid fa-sync me-1"></i> 새로고침
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+        </header>
+
+        <!-- 메인 콘텐츠 -->
+        <main class="app-main">
+            <div class="container-fluid h-100">
+                <div class="row h-100">
+                    <!-- 왼쪽 패널: 디자인 목록 및 정보 -->
+                    <div class="col-md-3 h-100 panel-left">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0">디자인 목록</h5>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown">
+                                        정렬
+                                    </button>
+                                    <ul class="dropdown-menu" aria-labelledby="sortDropdown">
+                                        <li><a class="dropdown-item sort-option" href="#" data-sort="reward" data-order="desc">보상 높은순</a></li>
+                                        <li><a class="dropdown-item sort-option" href="#" data-sort="reward" data-order="asc">보상 낮은순</a></li>
+                                        <li><a class="dropdown-item sort-option" href="#" data-sort="timestamp" data-order="desc">최신순</a></li>
+                                        <li><a class="dropdown-item sort-option" href="#" data-sort="timestamp" data-order="asc">오래된순</a></li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="card-body p-0 overflow-auto">
+                                <div class="list-group list-group-flush" id="design-list">
+                                    <!-- 디자인 목록이 여기에 동적으로 추가됩니다 -->
+                                    <div class="list-group-item text-center py-5">
+                                        <div class="spinner-border text-primary mb-2" role="status">
+                                            <span class="visually-hidden">로딩 중...</span>
+                                        </div>
+                                        <p class="mb-0">디자인 목록을 불러오는 중...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 중앙 패널: 3D 뷰어 -->
+                    <div class="col-md-6 h-100 panel-center">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0" id="viewer-title">3D 뷰어</h5>
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-reset-view">
+                                        <i class="fa-solid fa-home"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-wireframe">
+                                        <i class="fa-solid fa-vector-square"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" id="btn-screenshot">
+                                        <i class="fa-solid fa-camera"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div id="viewer-container">
+                                    <!-- Three.js 뷰어가 여기에 렌더링됩니다 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 오른쪽 패널: 피드백 입력 -->
+                    <div class="col-md-3 h-100 panel-right">
+                        <div class="card h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">피드백 입력</h5>
+                            </div>
+                            <div class="card-body overflow-auto">
+                                <form id="feedback-form">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">심미적 품질</label>
+                                        <div class="d-flex align-items-center">
+                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-aesthetic">
+                                            <span class="rating-value" id="rating-aesthetic-value">5.0</span>
+                                        </div>
+                                        <small class="text-muted">형태의 아름다움과 시각적 품질</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">기능성</label>
+                                        <div class="d-flex align-items-center">
+                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-functionality">
+                                            <span class="rating-value" id="rating-functionality-value">5.0</span>
+                                        </div>
+                                        <small class="text-muted">목적에 맞는 실용성 및 사용성</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">혁신성</label>
+                                        <div class="d-flex align-items-center">
+                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-innovation">
+                                            <span class="rating-value" id="rating-innovation-value">5.0</span>
+                                        </div>
+                                        <small class="text-muted">창의적이고 독특한 디자인 특성</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">실현 가능성</label>
+                                        <div class="d-flex align-items-center">
+                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-feasibility">
+                                            <span class="rating-value" id="rating-feasibility-value">5.0</span>
+                                        </div>
+                                        <small class="text-muted">제작 및 구현 용이성</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">전체적인 평가</label>
+                                        <div class="d-flex align-items-center">
+                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-overall">
+                                            <span class="rating-value" id="rating-overall-value">5.0</span>
+                                        </div>
+                                        <small class="text-muted">종합적인 디자인 품질</small>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label for="feedback-comment" class="form-label fw-bold">코멘트</label>
+                                        <textarea class="form-control" id="feedback-comment" rows="3" placeholder="이 디자인에 대한 추가 의견을 입력하세요..."></textarea>
+                                    </div>
+
+                                    <button type="submit" class="btn btn-primary w-100" id="btn-submit-feedback" disabled>
+                                        <i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출
+                                    </button>
+                                </form>
+
+                                <hr>
+
+                                <div class="design-info mt-3">
+                                    <h6 class="fw-bold">디자인 정보</h6>
+                                    <div class="design-info-content" id="design-info">
+                                        <p class="text-center text-muted py-3">먼저 왼쪽 패널에서 디자인을 선택하세요.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 푸터 -->
+        <footer class="app-footer">
+            <div class="container-fluid">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p class="mb-0">&copy; 2025 Grasshopper RLHF 시스템</p>
+                    </div>
+                    <div class="col-md-6 text-end">
+                        <p class="mb-0">
+                            <i class="fa-solid fa-circle text-success me-1"></i>
+                            <span id="zmq-status">ZMQ 연결 확인 중...</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 모달: 피드백 제출 확인 -->
+    <div class="modal fade" id="feedbackModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">피드백 제출 완료</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p>피드백이 성공적으로 제출되었습니다. 소중한 의견에 감사드립니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                    <button type="button" class="btn btn-primary" id="btn-next-design">다음 디자인</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 커스텀 JS -->
+    <script src="/static/js/three_viewer.js"></script>
+    <script src="/static/js/feedback_form.js"></script>
+    <script src="/static/js/design_manager.js"></script>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
