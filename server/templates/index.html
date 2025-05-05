@@ -15,8 +15,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/controls/OrbitControls.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
     
     <!-- 커스텀 CSS -->
     <link href="/static/css/styles.css" rel="stylesheet">
@@ -245,5 +245,428 @@
     <script src="/static/js/feedback_form.js"></script>
     <script src="/static/js/design_manager.js"></script>
     <script src="/static/js/main.js"></script>
+    <script>
+        // 간단한 디자인 로더
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('직접 디자인 로드 스크립트 실행 중...');
+            const designList = document.getElementById('design-list');
+            
+            if (!designList) {
+                console.error('디자인 목록 엘리먼트를 찾을 수 없습니다');
+                return;
+            }
+            
+            // 로딩 표시
+            designList.innerHTML = `
+                <div class="list-group-item text-center py-5">
+                    <div class="spinner-border text-primary mb-2" role="status">
+                        <span class="visually-hidden">로딩 중...</span>
+                    </div>
+                    <p class="mb-0">디자인 목록을 불러오는 중...</p>
+                </div>
+            `;
+            
+            // API에서 디자인 가져오기
+            fetch('/api/designs')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('디자인 데이터 로드됨:', data);
+                    
+                    if (data.designs && data.designs.length > 0) {
+                        // 디자인 목록 HTML 생성
+                        let html = '';
+                        
+                        data.designs.forEach(design => {
+                            const designId = design.id || 'unknown';
+                            const reward = design.reward !== null ? parseFloat(design.reward).toFixed(4) : 'N/A';
+                            const timestamp = design.timestamp ? new Date(design.timestamp).toLocaleString() : 'N/A';
+                            
+                            html += `
+                                <div class="list-group-item design-item" data-design-id="${designId}" onclick="selectDesign('${designId}')">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <div class="design-item-title">${designId.split('_')[0]}</div>
+                                            <div class="design-item-date">${timestamp}</div>
+                                        </div>
+                                        <div class="design-item-reward">${reward}</div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+
+                        // selectDesign 함수 전역으로 정의
+                        window.selectDesign = function(designId) {
+                            console.log('디자인 선택됨:', designId);
+                            
+                            // 현재 선택된 디자인 ID 전역 변수에 저장
+                            window.currentDesignId = designId;
+                            
+                            // 선택된 디자인 강조
+                            document.querySelectorAll('.design-item').forEach(el => {
+                                el.classList.remove('active');
+                            });
+                            document.querySelector(`.design-item[data-design-id="${designId}"]`).classList.add('active');
+                            
+                            // 디자인 정보 표시
+                            const designInfo = document.getElementById('design-info');
+                            if (designInfo) {
+                                const selectedItem = document.querySelector(`.design-item[data-design-id="${designId}"]`);
+                                designInfo.innerHTML = `
+                                    <p>선택된 디자인: ${designId}</p>
+                                    <p>보상: ${selectedItem.querySelector('.design-item-reward').textContent}</p>
+                                    <p>생성 시간: ${selectedItem.querySelector('.design-item-date').textContent}</p>
+                                `;
+                            }
+                            
+                            // 제출 버튼 활성화
+                            const submitButton = document.getElementById('btn-submit-feedback');
+                            if (submitButton) {
+                                submitButton.disabled = false;
+                            }
+                        };
+                        
+                        // 목록에 HTML 삽입
+                        designList.innerHTML = html;
+                        
+                        // 클릭 이벤트 리스너 추가
+                        document.querySelectorAll('.design-item').forEach(item => {
+                            item.addEventListener('click', function() {
+                                const id = this.dataset.designId;
+                                console.log('디자인 선택됨:', id);
+                                
+                                // 선택된 디자인 강조
+                                document.querySelectorAll('.design-item').forEach(el => {
+                                    el.classList.remove('active');
+                                });
+                                this.classList.add('active');
+                                
+                                // 디자인 정보 표시
+                                const designInfo = document.getElementById('design-info');
+                                if (designInfo) {
+                                    designInfo.innerHTML = `
+                                        <p>선택된 디자인: ${id}</p>
+                                        <p>보상: ${this.querySelector('.design-item-reward').textContent}</p>
+                                        <p>생성 시간: ${this.querySelector('.design-item-date').textContent}</p>
+                                    `;
+                                }
+                                
+                                // 제출 버튼 활성화
+                                const submitButton = document.getElementById('btn-submit-feedback');
+                                if (submitButton) {
+                                    submitButton.disabled = false;
+                                }
+                            });
+                        });
+                    } else {
+                        // 디자인이 없는 경우
+                        designList.innerHTML = `
+                            <div class="list-group-item text-center py-5">
+                                <i class="fa-solid fa-info-circle mb-2 fs-4 text-info"></i>
+                                <p class="mb-0">디자인 데이터가 없습니다.</p>
+                                <p class="small text-muted mt-2">디자인 데이터를 생성하거나 RLHF 기준 데이터를 가져오세요.</p>
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    console.error('디자인 로드 중 오류:', error);
+                    
+                    // 오류 메시지 표시
+                    designList.innerHTML = `
+                        <div class="list-group-item text-center py-5">
+                            <div class="alert alert-danger mb-0">
+                                <i class="fa-solid fa-exclamation-circle me-1"></i>
+                                오류: 디자인 목록을 불러올 수 없습니다.
+                            </div>
+                            <p class="small text-muted mt-2">콘솔을 확인하세요: ${error.message}</p>
+                        </div>
+                    `;
+                });
+        });
+        </script>
+<script>
+    // AppUtils와 ApiClient 간단 구현
+    window.AppUtils = {
+        formatNumber: function(value, decimals = 2) {
+            if (value === undefined || value === null) return 'N/A';
+            try {
+                return parseFloat(value).toFixed(decimals);
+            } catch (e) {
+                console.error('숫자 형식 변환 오류:', e);
+                return 'Error';
+            }
+        },
+        
+        formatDate: function(timestamp) {
+            if (!timestamp) return 'N/A';
+            try {
+                const date = new Date(timestamp);
+                return date.toLocaleString();
+            } catch (e) {
+                console.error('날짜 형식 변환 오류:', e);
+                return 'Invalid Date';
+            }
+        },
+        
+        formatArray: function(array, decimals = 2) {
+            if (!array || !Array.isArray(array)) return 'N/A';
+            try {
+                return array.map(item => {
+                    if (typeof item === 'number') {
+                        return this.formatNumber(item, decimals);
+                    }
+                    return item;
+                }).join(', ');
+            } catch (e) {
+                console.error('배열 형식 변환 오류:', e);
+                return 'Error';
+            }
+        },
+        
+        showToast: function(title, message, type = 'info', duration = 5000) {
+            alert(title + ': ' + message);
+        },
+        
+        handleApiError: function(error, fallbackMessage = '오류가 발생했습니다') {
+            console.error('API 오류:', error);
+            alert(fallbackMessage);
+            return null;
+        }
+    };
+    
+    window.ApiClient = {
+        async get(url, params = {}) {
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.status === 'error') {
+                    throw new Error(data.message || '서버 오류');
+                }
+                
+                return data;
+            } catch (error) {
+                window.AppUtils.handleApiError(error, `API 요청 실패: ${url}`);
+                throw error;
+            }
+        },
+        
+        async post(url, data = {}) {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const responseData = await response.json();
+                
+                if (responseData.status === 'error') {
+                    throw new Error(responseData.message || '서버 오류');
+                }
+                
+                return responseData;
+            } catch (error) {
+                window.AppUtils.handleApiError(error, `API 요청 실패: ${url}`);
+                throw error;
+            }
+        }
+    };
+    
+    // 간단한 피드백 폼 구현
+    document.addEventListener('DOMContentLoaded', function() {
+        // 폼 요소
+        const form = document.getElementById('feedback-form');
+        const submitButton = document.getElementById('btn-submit-feedback');
+        
+        // 현재 선택된 디자인 ID 저장 변수
+        let currentDesignId = null;
+        
+        // 디자인 아이템 클릭 이벤트 - 원래 스크립트에 있던 이벤트를 확장
+        document.addEventListener('click', function(event) {
+            const designItem = event.target.closest('.design-item');
+            if (designItem) {
+                currentDesignId = designItem.dataset.designId;
+                console.log('현재 선택된 디자인:', currentDesignId);
+                
+                // 제출 버튼 활성화
+                if (submitButton) {
+                    submitButton.disabled = false;
+                }
+            }
+        });
+        
+        // 폼 제출 이벤트
+        if (form) {
+            form.addEventListener('submit', async function(event) {
+                event.preventDefault();
+                
+                // 전역 변수에서 디자인 ID 가져오기
+                const currentDesignId = window.currentDesignId;
+                
+                if (!currentDesignId) {
+                    alert('피드백을 제출할 디자인이 선택되지 않았습니다.');
+                    return;
+                }
+                
+                try {
+                    // 제출 버튼 비활성화
+                    if (submitButton) {
+                        submitButton.disabled = true;
+                        submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> 제출 중...';
+                    }
+                    
+                    // 평가 데이터 수집
+                    const ratings = {};
+                    const sliders = {
+                        aesthetic: document.getElementById('rating-aesthetic'),
+                        functionality: document.getElementById('rating-functionality'),
+                        innovation: document.getElementById('rating-innovation'),
+                        feasibility: document.getElementById('rating-feasibility'),
+                        overall: document.getElementById('rating-overall')
+                    };
+                    
+                    for (const key in sliders) {
+                        if (sliders[key]) {
+                            ratings[key] = parseFloat(sliders[key].value);
+                        }
+                    }
+                    
+                    // 코멘트 가져오기
+                    const commentInput = document.getElementById('feedback-comment');
+                    const comment = commentInput ? commentInput.value.trim() : '';
+                    
+                    // 제출 데이터 구성
+                    const feedbackData = {
+                        design_id: currentDesignId,
+                        ratings: ratings,
+                        comment: comment
+                    };
+                    
+                    console.log('피드백 데이터:', feedbackData);
+                    
+                    // API 호출
+                    const response = await fetch('/api/feedback', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(feedbackData)
+                    });
+                    
+                    const responseData = await response.json();
+                    
+                    // 제출 버튼 원래대로 복원
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
+                    }
+                    
+                    if (responseData.status === 'success') {
+                        alert('피드백이 성공적으로 제출되었습니다.');
+                        
+                        // 폼 리셋
+                        for (const key in sliders) {
+                            if (sliders[key]) {
+                                sliders[key].value = 5;
+                                const valueLabel = document.getElementById(`rating-${key}-value`);
+                                if (valueLabel) {
+                                    valueLabel.textContent = '5.0';
+                                }
+                            }
+                        }
+                        
+                        if (commentInput) {
+                            commentInput.value = '';
+                        }
+                        
+                        // 다음 디자인 버튼 표시
+                        const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'));
+                        if (feedbackModal) {
+                            feedbackModal.show();
+                        }
+                    } else {
+                        alert('피드백 제출 실패: ' + (responseData.message || '알 수 없는 오류'));
+                    }
+                    
+                } catch (error) {
+                    console.error('피드백 제출 중 오류:', error);
+                    
+                    // 제출 버튼 원래대로 복원
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
+                    }
+                    
+                    alert('피드백 제출 중 오류가 발생했습니다: ' + error.message);
+                }
+            });
+        }
+        
+        // 슬라이더 값 표시 업데이트
+        document.querySelectorAll('input[type="range"]').forEach(slider => {
+            const valueId = slider.id + '-value';
+            const valueElement = document.getElementById(valueId);
+            
+            if (valueElement) {
+                slider.addEventListener('input', function() {
+                    valueElement.textContent = parseFloat(this.value).toFixed(1);
+                });
+            }
+        });
+        
+        // 다음 디자인 버튼
+        const nextDesignButton = document.getElementById('btn-next-design');
+        if (nextDesignButton) {
+            nextDesignButton.addEventListener('click', function() {
+                // 모달 닫기
+                const modal = bootstrap.Modal.getInstance(document.getElementById('feedbackModal'));
+                if (modal) {
+                    modal.hide();
+                }
+                
+                // 다음 디자인 선택
+                if (currentDesignId) {
+                    const designItems = document.querySelectorAll('.design-item');
+                    const designIds = Array.from(designItems).map(item => item.dataset.designId);
+                    const currentIndex = designIds.indexOf(currentDesignId);
+                    
+                    if (currentIndex !== -1 && designIds.length > 1) {
+                        const nextIndex = (currentIndex + 1) % designIds.length;
+                        const nextDesignId = designIds[nextIndex];
+                        
+                        // 다음 디자인 선택
+                        const nextDesignItem = document.querySelector(`.design-item[data-design-id="${nextDesignId}"]`);
+                        if (nextDesignItem) {
+                            nextDesignItem.click();
+                            nextDesignItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    }
+                }
+            });
+        }
+    });
+    </script>
+    <script>
+        // ZMQ 상태 확인 기능 비활성화
+        document.addEventListener('DOMContentLoaded', function() {
+            const zmqStatusEl = document.getElementById('zmq-status');
+            if (zmqStatusEl) {
+                zmqStatusEl.innerHTML = 'ZMQ 상태 확인 비활성화됨';
+                zmqStatusEl.classList.remove('text-success', 'text-danger');
+                zmqStatusEl.classList.add('text-warning');
+            }
+            
+            // API 요청 에러 메시지 숨기기
+            window.addEventListener('error', function(event) {
+                if (event.message && event.message.includes('api/zmq/ping')) {
+                    console.log('ZMQ 상태 확인 오류 무시됨');
+                    event.preventDefault();
+                }
+            });
+        });
+        </script>
 </body>
 </html>
