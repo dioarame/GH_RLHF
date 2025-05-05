@@ -240,52 +240,720 @@
     <!-- Bootstrap JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     
-    <!-- 커스텀 JS -->
-    <script src="/static/js/three_viewer.js"></script>
-    <script src="/static/js/feedback_form.js"></script>
-    <script src="/static/js/design_manager.js"></script>
-    <script src="/static/js/main.js"></script>
+    <!-- 통합 스크립트 - 이전 스크립트 모두 대체 -->
     <script>
-        // 간단한 디자인 로더
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('직접 디자인 로드 스크립트 실행 중...');
-            const designList = document.getElementById('design-list');
-            
-            if (!designList) {
-                console.error('디자인 목록 엘리먼트를 찾을 수 없습니다');
-                return;
+        // Three.js 뷰어 관련 문제 해결을 위한 수정된 코드 부분
+        // index.html 파일의 DOMContentLoaded 내부에 들어갈 함수
+
+        // 전역 변수들
+        let scene, camera, renderer, controls;
+
+        // Three.js 라이브러리 로드 확인
+        function checkThreeJsLoaded() {
+            if (typeof THREE === 'undefined') {
+                console.error('Three.js 라이브러리가 로드되지 않았습니다!');
+                
+                // 뷰어 컨테이너에 오류 메시지 표시
+                const viewerContainer = document.getElementById('viewer-container');
+                if (viewerContainer) {
+                    viewerContainer.innerHTML = `
+                        <div class="d-flex justify-content-center align-items-center h-100 text-light">
+                            <div class="text-center">
+                                <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
+                                <p>Three.js 라이브러리를 로드할 수 없습니다.</p>
+                                <p class="small">브라우저 콘솔을 확인해 주세요.</p>
+                            </div>
+                        </div>
+                    `;
+                }
+                return false;
             }
+            return true;
+        }
+
+        // 3D 모델 로드 함수
+        async function loadMesh(designId) {
+            const viewerContainer = document.getElementById('viewer-container');
+            if (!viewerContainer) return;
+            
+            // 라이브러리 로드 확인
+            if (!checkThreeJsLoaded()) return;
             
             // 로딩 표시
-            designList.innerHTML = `
-                <div class="list-group-item text-center py-5">
-                    <div class="spinner-border text-primary mb-2" role="status">
+            viewerContainer.innerHTML = `
+                <div class="viewer-loading">
+                    <div class="spinner-border text-light mb-2" role="status">
                         <span class="visually-hidden">로딩 중...</span>
                     </div>
-                    <p class="mb-0">디자인 목록을 불러오는 중...</p>
+                    <p class="mb-0">3D 모델 로딩 중...</p>
                 </div>
             `;
             
-            // API에서 디자인 가져오기
-            fetch('/api/designs')
-                .then(response => response.json())
-                .then(data => {
-                    console.log('디자인 데이터 로드됨:', data);
+            try {
+                console.log(`메쉬 데이터 요청 중: ${designId}`);
+                const response = await fetch(`/api/mesh/${designId}`);
+                const data = await response.json();
+                
+                if (data.status === 'error') {
+                    console.error('메쉬 로드 오류:', data.message);
+                    viewerContainer.innerHTML = `
+                        <div class="d-flex justify-content-center align-items-center h-100">
+                            <div class="text-center text-light">
+                                <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
+                                <p>3D 메쉬를 로드할 수 없습니다.</p>
+                                <p class="small">${data.message}</p>
+                            </div>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                console.log('메쉬 데이터 수신됨:', data.mesh ? '있음' : '없음');
+                
+                // Three.js 뷰어 초기화
+                initThreeViewer(data.mesh);
+                
+            } catch (error) {
+                console.error('메쉬 데이터 요청 오류:', error);
+                viewerContainer.innerHTML = `
+                    <div class="d-flex justify-content-center align-items-center h-100">
+                        <div class="text-center text-light">
+                            <i class="fa-solid fa-circle-exclamation fs-1 mb-3"></i>
+                            <p>서버 요청 중 오류가 발생했습니다.</p>
+                            <p class="small">${error.message}</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Three.js 뷰어 초기화
+        function initThreeViewer(meshData) {
+            try {
+                console.log('Three.js 뷰어 초기화 시작');
+                
+                const viewerContainer = document.getElementById('viewer-container');
+                if (!viewerContainer) {
+                    console.error('뷰어 컨테이너 요소를 찾을 수 없습니다!');
+                    return;
+                }
+                
+                // 기존 콘텐츠 및 Three.js 요소 정리
+                cleanup3dViewer();
+                
+                // 기존 콘텐츠 제거
+                viewerContainer.innerHTML = '';
+                
+                // 뷰어 초기화 로직
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x2c3e50);
+                
+                const width = viewerContainer.clientWidth || 400; // 기본값 설정
+                const height = viewerContainer.clientHeight || 300; // 기본값 설정
+                
+                console.log(`뷰어 크기: ${width}x${height}`);
+                
+                camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+                camera.position.set(5, 5, 5);
+                camera.lookAt(0, 0, 0);
+                
+                // 렌더러 생성
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.shadowMap.enabled = true;
+                
+                // 렌더러를 컨테이너에 추가
+                viewerContainer.appendChild(renderer.domElement);
+                
+                // 오류 확인
+                if (!viewerContainer.contains(renderer.domElement)) {
+                    console.error('렌더러 요소가 DOM에 추가되지 않았습니다!');
+                }
+                
+                // 컨트롤 생성
+                controls = new THREE.OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                
+                // 조명 추가
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+                scene.add(ambientLight);
+                
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(5, 10, 7);
+                directionalLight.castShadow = true;
+                scene.add(directionalLight);
+                
+                const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+                fillLight.position.set(-5, 5, -5);
+                scene.add(fillLight);
+                
+                // 그리드 헬퍼
+                const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
+                scene.add(gridHelper);
+                
+                // 축 헬퍼
+                const axesHelper = new THREE.AxesHelper(2);
+                scene.add(axesHelper);
+                
+                console.log('기본 장면 설정 완료');
+                
+                // 메쉬 데이터 로드
+                let meshesLoaded = 0;
+                if (meshData && meshData.meshes && Array.isArray(meshData.meshes)) {
+                    console.log(`로드할 메쉬 수: ${meshData.meshes.length}`);
+                    const meshes = [];
                     
-                    if (data.designs && data.designs.length > 0) {
+                    meshData.meshes.forEach((meshInfo, index) => {
+                        console.log(`메쉬 ${index + 1} 처리 중...`);
+                        if (!meshInfo.vertices || !meshInfo.faces) {
+                            console.warn(`메쉬 ${index + 1}에 정점 또는 면 데이터가 없습니다.`);
+                            return;
+                        }
+                        
+                        // 지오메트리 생성
+                        const geometry = new THREE.BufferGeometry();
+                        
+                        // 정점 설정
+                        const vertices = [];
+                        for (let i = 0; i < meshInfo.vertices.length; i++) {
+                            const vertex = meshInfo.vertices[i];
+                            vertices.push(vertex[0], vertex[1], vertex[2]);
+                        }
+                        
+                        console.log(`정점 수: ${meshInfo.vertices.length}`);
+                        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                        
+                        // 인덱스 설정
+                        const indices = [];
+                        for (let i = 0; i < meshInfo.faces.length; i++) {
+                            const face = meshInfo.faces[i];
+                            if (face.length === 3) {
+                                indices.push(face[0], face[1], face[2]);
+                            } else if (face.length === 4) {
+                                // 쿼드를 두 개의 삼각형으로 변환
+                                indices.push(face[0], face[1], face[2]);
+                                indices.push(face[0], face[2], face[3]);
+                            }
+                        }
+                        
+                        console.log(`면 수: ${meshInfo.faces.length}`);
+                        
+                        if (indices.length > 0) {
+                            geometry.setIndex(indices);
+                        }
+                        
+                        // 법선 설정
+                        if (meshInfo.normals && meshInfo.normals.length > 0) {
+                            const normals = [];
+                            for (let i = 0; i < meshInfo.normals.length; i++) {
+                                const normal = meshInfo.normals[i];
+                                normals.push(normal[0], normal[1], normal[2]);
+                            }
+                            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                            console.log(`법선 수: ${meshInfo.normals.length}`);
+                        } else {
+                            console.log('법선 자동 계산 중...');
+                            geometry.computeVertexNormals();
+                        }
+                        
+                        // 재질 생성
+                        const material = new THREE.MeshPhongMaterial({
+                            color: 0x3498db,
+                            specular: 0x111111,
+                            shininess: 30,
+                            flatShading: false,
+                            side: THREE.DoubleSide
+                        });
+                        
+                        // 메쉬 생성 및 추가
+                        const mesh = new THREE.Mesh(geometry, material);
+                        mesh.castShadow = true;
+                        mesh.receiveShadow = true;
+                        scene.add(mesh);
+                        meshes.push(mesh);
+                        meshesLoaded++;
+                    });
+                    
+                    console.log(`${meshesLoaded}개 메쉬 로드 완료`);
+                    
+                    // 메쉬 그룹 생성 및 중앙 정렬
+                    if (meshes.length > 0) {
+                        const group = new THREE.Group();
+                        meshes.forEach(mesh => group.add(mesh.clone()));
+                        
+                        const box = new THREE.Box3().setFromObject(group);
+                        const center = new THREE.Vector3();
+                        box.getCenter(center);
+                        
+                        // 메쉬를 중앙으로 이동
+                        meshes.forEach(mesh => {
+                            mesh.position.sub(center);
+                        });
+                        
+                        // 카메라 위치 조정
+                        const size = new THREE.Vector3();
+                        box.getSize(size);
+                        const maxDim = Math.max(size.x, size.y, size.z);
+                        const fov = camera.fov * (Math.PI / 180);
+                        let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * 1.5; // 안전 마진 추가
+                        
+                        camera.position.set(cameraDistance, cameraDistance, cameraDistance);
+                        camera.lookAt(0, 0, 0);
+                        controls.target.set(0, 0, 0);
+                        controls.update();
+                        
+                        console.log('카메라 및 컨트롤 설정 완료');
+                    }
+                } else {
+                    console.warn('유효한 메쉬 데이터가 없습니다.');
+                    // 기본 큐브 추가 (테스트용)
+                    const geometry = new THREE.BoxGeometry(1, 1, 1);
+                    const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
+                    const cube = new THREE.Mesh(geometry, material);
+                    scene.add(cube);
+                    console.log('기본 큐브 추가됨 (메쉬 데이터 없음)');
+                }
+                
+                // 화면 크기 변경 이벤트 리스너
+                window.addEventListener('resize', handleResize);
+                
+                // 버튼 이벤트 리스너 설정
+                setupButtonListeners();
+                
+                // 애니메이션 루프 시작
+                animate();
+                
+                console.log('Three.js 뷰어 초기화 완료');
+            } catch (error) {
+                console.error('Three.js 초기화 오류:', error);
+                
+                const viewerContainer = document.getElementById('viewer-container');
+                if (viewerContainer) {
+                    viewerContainer.innerHTML = `
+                        <div class="d-flex justify-content-center align-items-center h-100">
+                            <div class="text-center text-light">
+                                <i class="fa-solid fa-bug fs-1 mb-3"></i>
+                                <p>3D 뷰어 초기화 오류</p>
+                                <p class="small">${error.message}</p>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        // 화면 크기 변경 처리
+        function handleResize() {
+            if (!camera || !renderer || !document.getElementById('viewer-container')) return;
+            
+            const viewerContainer = document.getElementById('viewer-container');
+            const width = viewerContainer.clientWidth;
+            const height = viewerContainer.clientHeight;
+            
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            
+            renderer.setSize(width, height);
+        }
+
+        // 버튼 이벤트 리스너 설정
+        function setupButtonListeners() {
+            // 와이어프레임 전환 버튼
+            const wireframeButton = document.getElementById('btn-wireframe');
+            if (wireframeButton) {
+                wireframeButton.addEventListener('click', function() {
+                    if (!scene) return;
+                    
+                    scene.traverse(object => {
+                        if (object instanceof THREE.Mesh) {
+                            object.material.wireframe = !object.material.wireframe;
+                        }
+                    });
+                    
+                    this.classList.toggle('active');
+                });
+            }
+            
+            // 뷰 리셋 버튼
+            const resetButton = document.getElementById('btn-reset-view');
+            if (resetButton) {
+                resetButton.addEventListener('click', function() {
+                    if (!camera || !controls) return;
+                    
+                    camera.position.set(5, 5, 5);
+                    camera.lookAt(0, 0, 0);
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                });
+            }
+            
+            // 스크린샷 버튼
+            const screenshotButton = document.getElementById('btn-screenshot');
+            if (screenshotButton) {
+                screenshotButton.addEventListener('click', function() {
+                    if (!renderer) return;
+                    
+                    const dataUrl = renderer.domElement.toDataURL('image/png');
+                    
+                    // 스크린샷 표시
+                    const container = document.createElement('div');
+                    container.className = 'screenshot-container';
+                    
+                    const img = document.createElement('img');
+                    img.src = dataUrl;
+                    img.className = 'screenshot-image';
+                    
+                    const controls = document.createElement('div');
+                    controls.className = 'screenshot-controls';
+                    
+                    const closeButton = document.createElement('button');
+                    closeButton.className = 'btn btn-light me-2';
+                    closeButton.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    closeButton.addEventListener('click', () => {
+                        document.body.removeChild(container);
+                    });
+                    
+                    const downloadButton = document.createElement('button');
+                    downloadButton.className = 'btn btn-primary';
+                    downloadButton.innerHTML = '<i class="fa-solid fa-download me-1"></i> 다운로드';
+                    downloadButton.addEventListener('click', () => {
+                        const link = document.createElement('a');
+                        link.href = dataUrl;
+                        link.download = `design-${window.currentDesignId || 'screenshot'}.png`;
+                        link.click();
+                    });
+                    
+                    controls.appendChild(closeButton);
+                    controls.appendChild(downloadButton);
+                    
+                    container.appendChild(img);
+                    container.appendChild(controls);
+                    document.body.appendChild(container);
+                });
+            }
+        }
+
+        // 애니메이션 루프
+        function animate() {
+            if (!scene || !camera || !renderer) return;
+            
+            requestAnimationFrame(animate);
+            
+            // 컨트롤 업데이트
+            if (controls) {
+                controls.update();
+            }
+            
+            // 렌더링
+            renderer.render(scene, camera);
+        }
+
+        // 3D 뷰어 정리
+        function cleanup3dViewer() {
+            // 이전에 렌더러가 있었다면 정리
+            if (renderer) {
+                renderer.dispose();
+                // DOM에서 제거
+                const viewerContainer = document.getElementById('viewer-container');
+                if (viewerContainer && renderer.domElement && renderer.domElement.parentNode === viewerContainer) {
+                    viewerContainer.removeChild(renderer.domElement);
+                }
+            }
+            
+            // 리사이즈 이벤트 리스너 제거
+            window.removeEventListener('resize', handleResize);
+            
+            // 메모리 정리를 위해 참조 제거
+            if (scene) {
+                disposeScene(scene);
+            }
+            
+            scene = null;
+            camera = null;
+            renderer = null;
+            controls = null;
+        }
+
+        // 장면 내 리소스 정리
+        function disposeScene(scene) {
+            scene.traverse((object) => {
+                if (object.geometry) {
+                    object.geometry.dispose();
+                }
+                
+                if (object.material) {
+                    if (Array.isArray(object.material)) {
+                        object.material.forEach(material => disposeMaterial(material));
+                    } else {
+                        disposeMaterial(object.material);
+                    }
+                }
+            });
+        }
+
+        // 3D 뷰어 메모리 정리 부분 수정
+        function disposeMaterial(material) {
+            // 재질의 모든 텍스처 정리
+            for (const key in material) {
+                const value = material[key];
+                // dispose 메서드가 있는 경우에만 호출
+                if (value && typeof value === 'object' && typeof value.dispose === 'function') {
+                    value.dispose();
+                }
+            }
+            // 재질 자체의 dispose 호출
+            if (typeof material.dispose === 'function') {
+                material.dispose();
+            }
+        }
+        // 최종 수정된 스크립트 - 전체 스크립트를 이 내용으로 교체하세요
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('RLHF 인터페이스 초기화...');
+            
+            // 기본 요소들
+            const designList = document.getElementById('design-list');
+            const viewerContainer = document.getElementById('viewer-container');
+            const viewerTitle = document.getElementById('viewer-title');
+            const designInfo = document.getElementById('design-info');
+            const feedbackForm = document.getElementById('feedback-form');
+            const submitButton = document.getElementById('btn-submit-feedback');
+            const zmqStatusEl = document.getElementById('zmq-status');
+            
+            // 전역 변수들
+            window.currentDesignId = null;
+            let scene, camera, renderer, controls;
+            
+            // ZMQ 상태 메시지 비활성화
+            if (zmqStatusEl) {
+                zmqStatusEl.innerHTML = '서버 연결됨';
+                zmqStatusEl.classList.remove('text-danger', 'text-warning');
+                zmqStatusEl.classList.add('text-success');
+            }
+            
+            // API 요청 에러 메시지 숨기기
+            window.addEventListener('error', function(event) {
+                if (event.message && (event.message.includes('api/zmq/ping') || event.message.includes('ZMQ'))) {
+                    console.log('ZMQ 관련 오류 무시됨');
+                    event.preventDefault();
+                }
+            });
+            
+            // Three.js 라이브러리 로드 확인
+            function checkThreeJsLoaded() {
+                if (typeof THREE === 'undefined') {
+                    console.error('Three.js 라이브러리가 로드되지 않았습니다!');
+                    
+                    // 뷰어 컨테이너에 오류 메시지 표시
+                    if (viewerContainer) {
+                        viewerContainer.innerHTML = `
+                            <div class="d-flex justify-content-center align-items-center h-100 text-light">
+                                <div class="text-center">
+                                    <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
+                                    <p>Three.js 라이브러리를 로드할 수 없습니다.</p>
+                                    <p class="small">브라우저 콘솔을 확인해 주세요.</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    return false;
+                }
+                return true;
+            }
+            
+            // 선택 디자인 처리 함수 수정 - NaN 값 처리
+            window.selectDesign = async function(designId) {
+                console.log('디자인 선택:', designId);
+                
+                // 현재 선택된 디자인 ID 업데이트
+                window.currentDesignId = designId;
+                
+                // 이전 선택 디자인 비활성화
+                document.querySelectorAll('.design-item').forEach(el => {
+                    el.classList.remove('active');
+                });
+                
+                // 현재 디자인 활성화
+                const selectedItem = document.querySelector(`.design-item[data-design-id="${designId}"]`);
+                if (selectedItem) {
+                    selectedItem.classList.add('active');
+                    selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                
+                // 비주얼 피드백 - 선택한 디자인 타이틀 업데이트
+                if (viewerTitle) {
+                    viewerTitle.textContent = `디자인 ${designId.split('_')[0]}`;
+                }
+                
+                // 디자인 상세 정보 가져오기
+                try {
+                    const response = await fetch(`/api/designs/${designId}`);
+                    let data;
+                    
+                    try {
+                        // JSON 파싱 시도
+                        data = await response.json();
+                    } catch (jsonError) {
+                        console.error('JSON 파싱 오류:', jsonError);
+                        
+                        // 텍스트로 응답 다시 가져오기
+                        const textResponse = await response.text();
+                        console.log('원본 응답 텍스트:', textResponse);
+                        
+                        // NaN 값을 null로 변환하여 다시 파싱 시도
+                        const cleanedText = textResponse.replace(/NaN/g, 'null');
+                        try {
+                            data = JSON.parse(cleanedText);
+                            console.log('NaN 처리 후 파싱 성공');
+                        } catch (secondError) {
+                            console.error('두 번째 파싱 시도도 실패:', secondError);
+                            throw jsonError; // 원래 오류 다시 발생
+                        }
+                    }
+                    
+                    if (data.status === 'success' && data.design) {
+                        const design = data.design;
+                        
+                        // 디자인 정보 표시
+                        if (designInfo) {
+                            // 기본 정보 형식화
+                            const timestamp = design.timestamp ? new Date(design.timestamp) : new Date();
+                            const dateString = timestamp.toLocaleString();
+                            
+                            // 상태 값 가져오기 (NaN 값 처리)
+                            const state = design.state || [];
+                            
+                            // 액션 값 가져오기 (NaN 값 처리)
+                            const action = design.action || [];
+                            
+                            // HTML 구성
+                            let html = '<table class="design-info-table table-sm">';
+                            
+                            // ID 및 날짜
+                            html += `<tr><td>디자인 ID:</td><td>${design.id}</td></tr>`;
+                            html += `<tr><td>생성 시간:</td><td>${dateString}</td></tr>`;
+                            
+                            // 보상 값 (NaN 처리)
+                            const reward = (design.reward !== null && !isNaN(design.reward)) 
+                                ? parseFloat(design.reward).toFixed(4) 
+                                : 'N/A';
+                            html += `<tr><td>보상 값:</td><td><span class="badge bg-info">${reward}</span></td></tr>`;
+                            
+                            // 상태 및 액션 값
+                            html += `<tr><td colspan="2" class="pt-2"><strong>상태 값:</strong></td></tr>`;
+                            state.forEach((value, index) => {
+                                const formattedValue = (value !== null && !isNaN(value)) 
+                                    ? parseFloat(value).toFixed(4) 
+                                    : 'N/A';
+                                html += `<tr><td>상태 ${index + 1}:</td><td>${formattedValue}</td></tr>`;
+                            });
+                            
+                            html += `<tr><td colspan="2" class="pt-2"><strong>액션 값:</strong></td></tr>`;
+                            action.forEach((value, index) => {
+                                const formattedValue = (value !== null && !isNaN(value)) 
+                                    ? parseFloat(value).toFixed(4) 
+                                    : 'N/A';
+                                html += `<tr><td>액션 ${index + 1}:</td><td>${formattedValue}</td></tr>`;
+                            });
+                            
+                            html += '</table>';
+                            
+                            // 컨테이너에 삽입
+                            designInfo.innerHTML = html;
+                        }
+                        
+                        // 3D 뷰어에 메쉬 로드
+                        loadMesh(designId);
+                        
+                        // 피드백 폼 활성화
+                        if (submitButton) {
+                            submitButton.disabled = false;
+                        }
+                    }
+                } catch (error) {
+                    console.error('디자인 정보 로드 오류:', error);
+                    
+                    // 기본 정보만 표시
+                    if (designInfo) {
+                        designInfo.innerHTML = `
+                            <div class="alert alert-warning">
+                                <i class="fa-solid fa-exclamation-triangle me-2"></i>
+                                디자인 정보를 불러오는 중 오류가 발생했습니다.
+                            </div>
+                            <p>선택된 디자인: ${designId}</p>
+                        `;
+                    }
+                }
+            };
+
+            // 디자인 목록 로드 함수에도 NaN 값 처리 추가
+            async function loadDesigns() {
+                if (!designList) return;
+                
+                try {
+                    // 로딩 표시
+                    designList.innerHTML = `
+                        <div class="list-group-item text-center py-5">
+                            <div class="spinner-border text-primary mb-2" role="status">
+                                <span class="visually-hidden">로딩 중...</span>
+                            </div>
+                            <p class="mb-0">디자인 목록을 불러오는 중...</p>
+                        </div>
+                    `;
+                    
+                    // API에서 디자인 가져오기
+                    const response = await fetch('/api/designs');
+                    let data;
+                    
+                    try {
+                        // JSON 파싱 시도
+                        data = await response.json();
+                    } catch (jsonError) {
+                        console.error('JSON 파싱 오류:', jsonError);
+                        
+                        // 텍스트로 응답 다시 가져오기
+                        const textResponse = await response.text();
+                        
+                        // NaN 값을 null로 변환하여 다시 파싱 시도
+                        const cleanedText = textResponse.replace(/NaN/g, 'null');
+                        try {
+                            data = JSON.parse(cleanedText);
+                            console.log('NaN 처리 후 파싱 성공');
+                        } catch (secondError) {
+                            console.error('두 번째 파싱 시도도 실패:', secondError);
+                            throw jsonError; // 원래 오류 다시 발생
+                        }
+                    }
+                    
+                    if (data.status === 'success' && data.designs && data.designs.length > 0) {
                         // 디자인 목록 HTML 생성
                         let html = '';
                         
                         data.designs.forEach(design => {
                             const designId = design.id || 'unknown';
-                            const reward = design.reward !== null ? parseFloat(design.reward).toFixed(4) : 'N/A';
+                            // NaN 값 처리
+                            const reward = (design.reward !== null && !isNaN(design.reward)) 
+                                ? parseFloat(design.reward).toFixed(4) 
+                                : 'N/A';
                             const timestamp = design.timestamp ? new Date(design.timestamp).toLocaleString() : 'N/A';
                             
+                            // 액션 값 가져오기 (NaN 값 처리)
+                            const action = design.action || [];
+                            const actionStr = action.length > 0 
+                                ? action.map(val => {
+                                    return (val !== null && !isNaN(val)) 
+                                        ? parseFloat(val).toFixed(2) 
+                                        : 'N/A';
+                                }).join(', ')
+                                : 'N/A';
+                            
                             html += `
-                                <div class="list-group-item design-item" data-design-id="${designId}" onclick="selectDesign('${designId}')">
+                                <div class="list-group-item design-item" data-design-id="${designId}">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
                                             <div class="design-item-title">${designId.split('_')[0]}</div>
+                                            <div class="small">액션: ${actionStr}</div>
                                             <div class="design-item-date">${timestamp}</div>
                                         </div>
                                         <div class="design-item-reward">${reward}</div>
@@ -293,37 +961,6 @@
                                 </div>
                             `;
                         });
-
-                        // selectDesign 함수 전역으로 정의
-                        window.selectDesign = function(designId) {
-                            console.log('디자인 선택됨:', designId);
-                            
-                            // 현재 선택된 디자인 ID 전역 변수에 저장
-                            window.currentDesignId = designId;
-                            
-                            // 선택된 디자인 강조
-                            document.querySelectorAll('.design-item').forEach(el => {
-                                el.classList.remove('active');
-                            });
-                            document.querySelector(`.design-item[data-design-id="${designId}"]`).classList.add('active');
-                            
-                            // 디자인 정보 표시
-                            const designInfo = document.getElementById('design-info');
-                            if (designInfo) {
-                                const selectedItem = document.querySelector(`.design-item[data-design-id="${designId}"]`);
-                                designInfo.innerHTML = `
-                                    <p>선택된 디자인: ${designId}</p>
-                                    <p>보상: ${selectedItem.querySelector('.design-item-reward').textContent}</p>
-                                    <p>생성 시간: ${selectedItem.querySelector('.design-item-date').textContent}</p>
-                                `;
-                            }
-                            
-                            // 제출 버튼 활성화
-                            const submitButton = document.getElementById('btn-submit-feedback');
-                            if (submitButton) {
-                                submitButton.disabled = false;
-                            }
-                        };
                         
                         // 목록에 HTML 삽입
                         designList.innerHTML = html;
@@ -332,31 +969,14 @@
                         document.querySelectorAll('.design-item').forEach(item => {
                             item.addEventListener('click', function() {
                                 const id = this.dataset.designId;
-                                console.log('디자인 선택됨:', id);
-                                
-                                // 선택된 디자인 강조
-                                document.querySelectorAll('.design-item').forEach(el => {
-                                    el.classList.remove('active');
-                                });
-                                this.classList.add('active');
-                                
-                                // 디자인 정보 표시
-                                const designInfo = document.getElementById('design-info');
-                                if (designInfo) {
-                                    designInfo.innerHTML = `
-                                        <p>선택된 디자인: ${id}</p>
-                                        <p>보상: ${this.querySelector('.design-item-reward').textContent}</p>
-                                        <p>생성 시간: ${this.querySelector('.design-item-date').textContent}</p>
-                                    `;
-                                }
-                                
-                                // 제출 버튼 활성화
-                                const submitButton = document.getElementById('btn-submit-feedback');
-                                if (submitButton) {
-                                    submitButton.disabled = false;
-                                }
+                                window.selectDesign(id);
                             });
                         });
+                        
+                        // 첫 번째 디자인 자동 선택
+                        if (data.designs.length > 0) {
+                            window.selectDesign(data.designs[0].id);
+                        }
                     } else {
                         // 디자인이 없는 경우
                         designList.innerHTML = `
@@ -367,8 +987,7 @@
                             </div>
                         `;
                     }
-                })
-                .catch(error => {
+                } catch (error) {
                     console.error('디자인 로드 중 오류:', error);
                     
                     // 오류 메시지 표시
@@ -381,292 +1000,700 @@
                             <p class="small text-muted mt-2">콘솔을 확인하세요: ${error.message}</p>
                         </div>
                     `;
-                });
-        });
-        </script>
-<script>
-    // AppUtils와 ApiClient 간단 구현
-    window.AppUtils = {
-        formatNumber: function(value, decimals = 2) {
-            if (value === undefined || value === null) return 'N/A';
-            try {
-                return parseFloat(value).toFixed(decimals);
-            } catch (e) {
-                console.error('숫자 형식 변환 오류:', e);
-                return 'Error';
+                }
             }
-        },
-        
-        formatDate: function(timestamp) {
-            if (!timestamp) return 'N/A';
-            try {
-                const date = new Date(timestamp);
-                return date.toLocaleString();
-            } catch (e) {
-                console.error('날짜 형식 변환 오류:', e);
-                return 'Invalid Date';
-            }
-        },
-        
-        formatArray: function(array, decimals = 2) {
-            if (!array || !Array.isArray(array)) return 'N/A';
-            try {
-                return array.map(item => {
-                    if (typeof item === 'number') {
-                        return this.formatNumber(item, decimals);
+            
+            // 3D 뷰어 정리
+            function cleanup3dViewer() {
+                console.log('3D 뷰어 리소스 정리 중...');
+                
+                // 이전에 렌더러가 있었다면 정리
+                if (renderer) {
+                    renderer.dispose();
+                    // DOM에서 제거
+                    if (viewerContainer && renderer.domElement && renderer.domElement.parentNode === viewerContainer) {
+                        viewerContainer.removeChild(renderer.domElement);
                     }
-                    return item;
-                }).join(', ');
-            } catch (e) {
-                console.error('배열 형식 변환 오류:', e);
-                return 'Error';
-            }
-        },
-        
-        showToast: function(title, message, type = 'info', duration = 5000) {
-            alert(title + ': ' + message);
-        },
-        
-        handleApiError: function(error, fallbackMessage = '오류가 발생했습니다') {
-            console.error('API 오류:', error);
-            alert(fallbackMessage);
-            return null;
-        }
-    };
-    
-    window.ApiClient = {
-        async get(url, params = {}) {
-            try {
-                const response = await fetch(url);
-                const data = await response.json();
-                
-                if (data.status === 'error') {
-                    throw new Error(data.message || '서버 오류');
                 }
                 
-                return data;
-            } catch (error) {
-                window.AppUtils.handleApiError(error, `API 요청 실패: ${url}`);
-                throw error;
+                // 리사이즈 이벤트 리스너 제거
+                window.removeEventListener('resize', handleResize);
+                
+                // 메모리 정리를 위해 참조 제거
+                if (scene) {
+                    disposeScene(scene);
+                }
+                
+                scene = null;
+                camera = null;
+                renderer = null;
+                controls = null;
+                
+                console.log('3D 뷰어 리소스 정리 완료');
             }
-        },
-        
-        async post(url, data = {}) {
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
+            
+            // 장면 내 리소스 정리
+            function disposeScene(scene) {
+                scene.traverse((object) => {
+                    if (object.geometry) {
+                        object.geometry.dispose();
+                    }
+                    
+                    if (object.material) {
+                        if (Array.isArray(object.material)) {
+                            object.material.forEach(material => disposeMaterial(material));
+                        } else {
+                            disposeMaterial(object.material);
+                        }
+                    }
+                });
+            }
+            
+            // 재질 정리
+            function disposeMaterial(material) {
+                // 재질의 모든 텍스처 정리
+                for (const key in material) {
+                    const value = material[key];
+                    if (value && typeof value === 'object' && 'dispose' in value) {
+                        value.dispose();
+                    }
+                }
+                material.dispose();
+            }
+            
+            // 1. 자동 줌 기능 개선 (ZEA 효과)
+            function fitCameraToMeshes(meshes, camera, controls, fitOffset = 1.2) {
+                if (!meshes || meshes.length === 0 || !camera || !controls) {
+                    console.warn('fitCameraToMeshes: 유효한 매개변수가 없습니다');
+                    return false;
+                }
+
+                try {
+                    // 모든 메쉬를 포함하는 경계 상자 생성
+                    const box = new THREE.Box3();
+                    
+                    // 모든 메쉬의 경계 상자 계산
+                    meshes.forEach(mesh => {
+                        mesh.geometry.computeBoundingBox();
+                        box.expandByObject(mesh);
+                    });
+                    
+                    // 경계 상자가 유효하지 않으면 종료
+                    if (box.isEmpty() || !isFinite(box.min.x) || !isFinite(box.max.x)) {
+                        console.warn('fitCameraToMeshes: 유효하지 않은 경계 상자');
+                        return false;
+                    }
+                    
+                    // 경계 상자 중심과 크기 계산
+                    const center = new THREE.Vector3();
+                    box.getCenter(center);
+                    
+                    const size = new THREE.Vector3();
+                    box.getSize(size);
+                    
+                    // 가장 큰 차원 찾기
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const fov = camera.fov * (Math.PI / 180);
+                    
+                    // 최적 거리 계산 (더 가까이 보이도록 조정)
+                    let cameraDistance = Math.abs((maxDim / 2) / Math.tan(fov / 2)) * fitOffset;
+                    
+                    // 더 가까운 거리에서 보기 위해 거리 조정 (0.8 배율 적용)
+                    cameraDistance *= 0.8;
+                    
+                    // 카메라 위치 계산 (약간 각도 조정)
+                    const direction = new THREE.Vector3(1, 0.8, 1).normalize();
+                    camera.position.copy(center).add(direction.multiplyScalar(cameraDistance));
+                    
+                    // 카메라가 중심을 바라보도록 설정
+                    camera.lookAt(center);
+                    
+                    // 컨트롤의 타겟을 중심으로 설정
+                    controls.target.copy(center);
+                    controls.update();
+                    
+                    console.log('카메라 자동 줌 적용됨 (ZEA 효과)');
+                    return true;
+                } catch (error) {
+                    console.error('fitCameraToMeshes 오류:', error);
+                    return false;
+                }
+            }
+
+            // 2. Three.js 뷰어 초기화 함수 수정 (자동 줌 적용)
+            function initThreeViewer(meshData) {
+                try {
+                    console.log('Three.js 뷰어 초기화 시작');
+                    
+                    if (!viewerContainer) {
+                        console.error('뷰어 컨테이너 요소를 찾을 수 없습니다!');
+                        return;
+                    }
+                    
+                    // 기존 콘텐츠 및 Three.js 요소 정리
+                    cleanup3dViewer();
+                    
+                    // 기존 콘텐츠 제거
+                    viewerContainer.innerHTML = '';
+                    
+                    // 뷰어 초기화 로직
+                    scene = new THREE.Scene();
+                    scene.background = new THREE.Color(0x2c3e50);
+                    
+                    const width = viewerContainer.clientWidth || 400; // 기본값 설정
+                    const height = viewerContainer.clientHeight || 300; // 기본값 설정
+                    
+                    console.log(`뷰어 크기: ${width}x${height}`);
+                    
+                    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+                    camera.position.set(5, 5, 5);
+                    camera.lookAt(0, 0, 0);
+                    
+                    // 렌더러 생성
+                    renderer = new THREE.WebGLRenderer({ antialias: true });
+                    renderer.setSize(width, height);
+                    renderer.setPixelRatio(window.devicePixelRatio);
+                    renderer.shadowMap.enabled = true;
+                    
+                    // 렌더러를 컨테이너에 추가
+                    viewerContainer.appendChild(renderer.domElement);
+                    
+                    // 오류 확인
+                    if (!viewerContainer.contains(renderer.domElement)) {
+                        console.error('렌더러 요소가 DOM에 추가되지 않았습니다!');
+                    }
+                    
+                    // 컨트롤 생성
+                    controls = new THREE.OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+                    controls.dampingFactor = 0.05;
+                    
+                    // 조명 추가
+                    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+                    scene.add(ambientLight);
+                    
+                    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                    directionalLight.position.set(5, 10, 7);
+                    directionalLight.castShadow = true;
+                    scene.add(directionalLight);
+                    
+                    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+                    fillLight.position.set(-5, 5, -5);
+                    scene.add(fillLight);
+                    
+                    // 그리드 헬퍼
+                    const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
+                    scene.add(gridHelper);
+                    
+                    // 축 헬퍼
+                    const axesHelper = new THREE.AxesHelper(2);
+                    scene.add(axesHelper);
+                    
+                    console.log('기본 장면 설정 완료');
+                    
+                    // 메쉬 데이터 로드
+                    let meshesLoaded = 0;
+                    const meshes = [];
+                    
+                    if (meshData && meshData.meshes && Array.isArray(meshData.meshes)) {
+                        console.log(`로드할 메쉬 수: ${meshData.meshes.length}`);
+                        
+                        meshData.meshes.forEach((meshInfo, index) => {
+                            console.log(`메쉬 ${index + 1} 처리 중...`);
+                            if (!meshInfo.vertices || !meshInfo.faces) {
+                                console.warn(`메쉬 ${index + 1}에 정점 또는 면 데이터가 없습니다.`);
+                                return;
+                            }
+                            
+                            try {
+                                // 지오메트리 생성
+                                const geometry = new THREE.BufferGeometry();
+                                
+                                // 정점 설정
+                                const vertices = [];
+                                for (let i = 0; i < meshInfo.vertices.length; i++) {
+                                    const vertex = meshInfo.vertices[i];
+                                    vertices.push(vertex[0], vertex[1], vertex[2]);
+                                }
+                                
+                                console.log(`정점 수: ${meshInfo.vertices.length}`);
+                                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                                
+                                // 인덱스 설정
+                                const indices = [];
+                                for (let i = 0; i < meshInfo.faces.length; i++) {
+                                    const face = meshInfo.faces[i];
+                                    if (face.length === 3) {
+                                        indices.push(face[0], face[1], face[2]);
+                                    } else if (face.length === 4) {
+                                        // 쿼드를 두 개의 삼각형으로 변환
+                                        indices.push(face[0], face[1], face[2]);
+                                        indices.push(face[0], face[2], face[3]);
+                                    }
+                                }
+                                
+                                console.log(`면 수: ${meshInfo.faces.length}`);
+                                
+                                if (indices.length > 0) {
+                                    geometry.setIndex(indices);
+                                }
+                                
+                                // 법선 설정
+                                if (meshInfo.normals && meshInfo.normals.length > 0) {
+                                    const normals = [];
+                                    for (let i = 0; i < meshInfo.normals.length; i++) {
+                                        const normal = meshInfo.normals[i];
+                                        normals.push(normal[0], normal[1], normal[2]);
+                                    }
+                                    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+                                    console.log(`법선 수: ${meshInfo.normals.length}`);
+                                } else {
+                                    console.log('법선 자동 계산 중...');
+                                    geometry.computeVertexNormals();
+                                }
+                                
+                                // 메쉬 위치를 중심에 맞추기 위해 바운딩 박스 계산
+                                geometry.computeBoundingBox();
+                                
+                                // 재질 생성
+                                const material = new THREE.MeshPhongMaterial({
+                                    color: 0x3498db,
+                                    specular: 0x111111,
+                                    shininess: 30,
+                                    flatShading: false,
+                                    side: THREE.DoubleSide
+                                });
+                                
+                                // 메쉬 생성 및 추가
+                                const mesh = new THREE.Mesh(geometry, material);
+                                mesh.castShadow = true;
+                                mesh.receiveShadow = true;
+                                scene.add(mesh);
+                                meshes.push(mesh);
+                                meshesLoaded++;
+                            } catch (meshError) {
+                                console.error(`메쉬 ${index + 1} 처리 중 오류:`, meshError);
+                            }
+                        });
+                        
+                        console.log(`${meshesLoaded}개 메쉬 로드 완료`);
+                        
+                        // 자동 줌 적용 (ZEA 효과)
+                        if (meshes.length > 0) {
+                            // 약간의 지연 후 자동 줌 적용 (메쉬가 완전히 로드된 후)
+                            setTimeout(() => {
+                                const success = fitCameraToMeshes(meshes, camera, controls);
+                                if (success) {
+                                    console.log('자동 줌 적용 성공 (ZEA 효과)');
+                                } else {
+                                    console.warn('자동 줌 적용 실패, 기본 카메라 위치 사용');
+                                }
+                            }, 100);
+                        } else {
+                            // 메쉬가 없는 경우 기본 큐브 추가 (테스트용)
+                            console.log('메쉬를 로드할 수 없습니다. 기본 큐브 생성 중...');
+                            const geometry = new THREE.BoxGeometry(1, 1, 1);
+                            const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
+                            const cube = new THREE.Mesh(geometry, material);
+                            scene.add(cube);
+                            meshes.push(cube);
+                            
+                            // 기본 큐브에도 자동 줌 적용
+                            setTimeout(() => {
+                                fitCameraToMeshes(meshes, camera, controls);
+                            }, 100);
+                        }
+                    } else {
+                        console.warn('유효한 메쉬 데이터가 없습니다. 기본 큐브 생성 중...');
+                        // 기본 큐브 추가 (테스트용)
+                        const geometry = new THREE.BoxGeometry(1, 1, 1);
+                        const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
+                        const cube = new THREE.Mesh(geometry, material);
+                        scene.add(cube);
+                        meshes.push(cube);
+                        
+                        // 기본 큐브에도 자동 줌 적용
+                        setTimeout(() => {
+                            fitCameraToMeshes(meshes, camera, controls);
+                        }, 100);
+                    }
+                    
+                    // 화면 크기 변경 이벤트 리스너
+                    window.addEventListener('resize', handleResize);
+                    
+                    // 애니메이션 루프 시작
+                    animate();
+                    
+                    // 버튼 이벤트 리스너 설정
+                    setupButtonListeners();
+                    
+                    console.log('Three.js 뷰어 초기화 완료');
+                } catch (error) {
+                    console.error('Three.js 초기화 오류:', error);
+                    
+                    if (viewerContainer) {
+                        viewerContainer.innerHTML = `
+                            <div class="d-flex justify-content-center align-items-center h-100">
+                                <div class="text-center text-light">
+                                    <i class="fa-solid fa-bug fs-1 mb-3"></i>
+                                    <p>3D 뷰어 초기화 오류</p>
+                                    <p class="small">${error.message}</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            }
+
+            // 3. 뷰 리셋 버튼 핸들러 업데이트
+            function setupButtonListeners() {
+                // 와이어프레임 전환 버튼
+                const wireframeButton = document.getElementById('btn-wireframe');
+                if (wireframeButton) {
+                    wireframeButton.addEventListener('click', function() {
+                        if (!scene) return;
+                        
+                        scene.traverse(object => {
+                            if (object instanceof THREE.Mesh) {
+                                object.material.wireframe = !object.material.wireframe;
+                            }
+                        });
+                        
+                        this.classList.toggle('active');
+                    });
+                }
+                
+                // 뷰 리셋 버튼 - 자동 줌 적용
+                const resetButton = document.getElementById('btn-reset-view');
+                if (resetButton) {
+                    resetButton.addEventListener('click', function() {
+                        if (!camera || !controls || !scene) return;
+                        
+                        // 씬에서 메쉬 목록 가져오기
+                        const meshes = [];
+                        scene.traverse((object) => {
+                            if (object instanceof THREE.Mesh) {
+                                meshes.push(object);
+                            }
+                        });
+                        
+                        // 자동 줌 적용 (ZEA 효과)
+                        if (meshes.length > 0) {
+                            fitCameraToMeshes(meshes, camera, controls);
+                        } else {
+                            // 메쉬가 없으면 기본 위치로
+                            camera.position.set(5, 5, 5);
+                            camera.lookAt(0, 0, 0);
+                            controls.target.set(0, 0, 0);
+                            controls.update();
+                        }
+                    });
+                }
+                
+                // 스크린샷 버튼
+                const screenshotButton = document.getElementById('btn-screenshot');
+                if (screenshotButton) {
+                    screenshotButton.addEventListener('click', function() {
+                        if (!renderer) return;
+                        
+                        const dataUrl = renderer.domElement.toDataURL('image/png');
+                        
+                        // 스크린샷 표시
+                        const container = document.createElement('div');
+                        container.className = 'screenshot-container';
+                        
+                        const img = document.createElement('img');
+                        img.src = dataUrl;
+                        img.className = 'screenshot-image';
+                        
+                        const controls = document.createElement('div');
+                        controls.className = 'screenshot-controls';
+                        
+                        const closeButton = document.createElement('button');
+                        closeButton.className = 'btn btn-light me-2';
+                        closeButton.innerHTML = '<i class="fa-solid fa-times"></i>';
+                        closeButton.addEventListener('click', () => {
+                            document.body.removeChild(container);
+                        });
+                        
+                        const downloadButton = document.createElement('button');
+                        downloadButton.className = 'btn btn-primary';
+                        downloadButton.innerHTML = '<i class="fa-solid fa-download me-1"></i> 다운로드';
+                        downloadButton.addEventListener('click', () => {
+                            const link = document.createElement('a');
+                            link.href = dataUrl;
+                            link.download = `design-${window.currentDesignId || 'screenshot'}.png`;
+                            link.click();
+                        });
+                        
+                        controls.appendChild(closeButton);
+                        controls.appendChild(downloadButton);
+                        
+                        container.appendChild(img);
+                        container.appendChild(controls);
+                        document.body.appendChild(container);
+                    });
+                }
+            }
+            
+            // 애니메이션 루프
+            function animate() {
+                if (!scene || !camera || !renderer) return;
+                
+                requestAnimationFrame(animate);
+                
+                // 컨트롤 업데이트
+                if (controls) {
+                    controls.update();
+                }
+                
+                // 렌더링
+                renderer.render(scene, camera);
+            }
+            
+            // 피드백 폼 처리
+            if (feedbackForm) {
+                // 슬라이더 값 표시 업데이트
+                document.querySelectorAll('input[type="range"]').forEach(slider => {
+                    const valueId = slider.id + '-value';
+                    const valueElement = document.getElementById(valueId);
+                    
+                    if (valueElement) {
+                        slider.addEventListener('input', function() {
+                            valueElement.textContent = parseFloat(this.value).toFixed(1);
+                        });
+                    }
                 });
                 
-                const responseData = await response.json();
-                
-                if (responseData.status === 'error') {
-                    throw new Error(responseData.message || '서버 오류');
-                }
-                
-                return responseData;
-            } catch (error) {
-                window.AppUtils.handleApiError(error, `API 요청 실패: ${url}`);
-                throw error;
-            }
-        }
-    };
-    
-    // 간단한 피드백 폼 구현
-    document.addEventListener('DOMContentLoaded', function() {
-        // 폼 요소
-        const form = document.getElementById('feedback-form');
-        const submitButton = document.getElementById('btn-submit-feedback');
-        
-        // 현재 선택된 디자인 ID 저장 변수
-        let currentDesignId = null;
-        
-        // 디자인 아이템 클릭 이벤트 - 원래 스크립트에 있던 이벤트를 확장
-        document.addEventListener('click', function(event) {
-            const designItem = event.target.closest('.design-item');
-            if (designItem) {
-                currentDesignId = designItem.dataset.designId;
-                console.log('현재 선택된 디자인:', currentDesignId);
-                
-                // 제출 버튼 활성화
-                if (submitButton) {
-                    submitButton.disabled = false;
-                }
-            }
-        });
-        
-        // 폼 제출 이벤트
-        if (form) {
-            form.addEventListener('submit', async function(event) {
-                event.preventDefault();
-                
-                // 전역 변수에서 디자인 ID 가져오기
-                const currentDesignId = window.currentDesignId;
-                
-                if (!currentDesignId) {
-                    alert('피드백을 제출할 디자인이 선택되지 않았습니다.');
-                    return;
-                }
-                
-                try {
+                // 폼 제출 이벤트
+                feedbackForm.addEventListener('submit', async function(event) {
+                    event.preventDefault();
+                    
+                    // 선택된 디자인 확인
+                    if (!window.currentDesignId) {
+                        alert('피드백을 제출할 디자인이 선택되지 않았습니다.');
+                        return;
+                    }
+                    
                     // 제출 버튼 비활성화
                     if (submitButton) {
                         submitButton.disabled = true;
                         submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> 제출 중...';
                     }
                     
-                    // 평가 데이터 수집
-                    const ratings = {};
-                    const sliders = {
-                        aesthetic: document.getElementById('rating-aesthetic'),
-                        functionality: document.getElementById('rating-functionality'),
-                        innovation: document.getElementById('rating-innovation'),
-                        feasibility: document.getElementById('rating-feasibility'),
-                        overall: document.getElementById('rating-overall')
-                    };
-                    
-                    for (const key in sliders) {
-                        if (sliders[key]) {
-                            ratings[key] = parseFloat(sliders[key].value);
-                        }
-                    }
-                    
-                    // 코멘트 가져오기
-                    const commentInput = document.getElementById('feedback-comment');
-                    const comment = commentInput ? commentInput.value.trim() : '';
-                    
-                    // 제출 데이터 구성
-                    const feedbackData = {
-                        design_id: currentDesignId,
-                        ratings: ratings,
-                        comment: comment
-                    };
-                    
-                    console.log('피드백 데이터:', feedbackData);
-                    
-                    // API 호출
-                    const response = await fetch('/api/feedback', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(feedbackData)
-                    });
-                    
-                    const responseData = await response.json();
-                    
-                    // 제출 버튼 원래대로 복원
-                    if (submitButton) {
-                        submitButton.disabled = false;
-                        submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
-                    }
-                    
-                    if (responseData.status === 'success') {
-                        alert('피드백이 성공적으로 제출되었습니다.');
+                    try {
+                        // 평가 데이터 수집
+                        const ratings = {};
+                        const sliders = {
+                            aesthetic: document.getElementById('rating-aesthetic'),
+                            functionality: document.getElementById('rating-functionality'),
+                            innovation: document.getElementById('rating-innovation'),
+                            feasibility: document.getElementById('rating-feasibility'),
+                            overall: document.getElementById('rating-overall')
+                        };
                         
-                        // 폼 리셋
                         for (const key in sliders) {
                             if (sliders[key]) {
-                                sliders[key].value = 5;
-                                const valueLabel = document.getElementById(`rating-${key}-value`);
-                                if (valueLabel) {
-                                    valueLabel.textContent = '5.0';
-                                }
+                                ratings[key] = parseFloat(sliders[key].value);
                             }
                         }
                         
-                        if (commentInput) {
-                            commentInput.value = '';
+                        // 코멘트 가져오기
+                        const commentInput = document.getElementById('feedback-comment');
+                        const comment = commentInput ? commentInput.value.trim() : '';
+                        
+                        // 제출 데이터 구성
+                        const feedbackData = {
+                            design_id: window.currentDesignId,
+                            ratings: ratings,
+                            comment: comment
+                        };
+                        
+                        console.log('피드백 데이터 제출:', feedbackData);
+                        
+                        // API 호출
+                        const response = await fetch('/api/feedback', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(feedbackData)
+                        });
+                        
+                        const data = await response.json();
+                        
+                        // 제출 버튼 원래대로 복원
+                        if (submitButton) {
+                            submitButton.disabled = false;
+                            submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
                         }
                         
-                        // 다음 디자인 버튼 표시
-                        const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'));
-                        if (feedbackModal) {
+                        if (data.status === 'success') {
+                            console.log('피드백 제출 성공:', data);
+                            
+                            // 성공 메시지 표시
+                            const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'));
                             feedbackModal.show();
+                            
+                            // 폼 리셋
+                            for (const key in sliders) {
+                                if (sliders[key]) {
+                                    sliders[key].value = 5;
+                                    const valueLabel = document.getElementById(`rating-${key}-value`);
+                                    if (valueLabel) {
+                                        valueLabel.textContent = '5.0';
+                                    }
+                                }
+                            }
+                            
+                            if (commentInput) {
+                                commentInput.value = '';
+                            }
+                        } else {
+                            console.error('피드백 제출 실패:', data);
+                            alert('피드백 제출 실패: ' + (data.message || '알 수 없는 오류'));
                         }
-                    } else {
-                        alert('피드백 제출 실패: ' + (responseData.message || '알 수 없는 오류'));
+                    } catch (error) {
+                        console.error('피드백 제출 중 오류:', error);
+                        
+                        // 제출 버튼 원래대로 복원
+                        if (submitButton) {
+                            submitButton.disabled = false;
+                            submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
+                        }
+                        
+                        alert('피드백 제출 중 오류가 발생했습니다: ' + error.message);
                     }
-                    
-                } catch (error) {
-                    console.error('피드백 제출 중 오류:', error);
-                    
-                    // 제출 버튼 원래대로 복원
-                    if (submitButton) {
-                        submitButton.disabled = false;
-                        submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
-                    }
-                    
-                    alert('피드백 제출 중 오류가 발생했습니다: ' + error.message);
-                }
-            });
-        }
-        
-        // 슬라이더 값 표시 업데이트
-        document.querySelectorAll('input[type="range"]').forEach(slider => {
-            const valueId = slider.id + '-value';
-            const valueElement = document.getElementById(valueId);
-            
-            if (valueElement) {
-                slider.addEventListener('input', function() {
-                    valueElement.textContent = parseFloat(this.value).toFixed(1);
                 });
             }
-        });
-        
-        // 다음 디자인 버튼
-        const nextDesignButton = document.getElementById('btn-next-design');
-        if (nextDesignButton) {
-            nextDesignButton.addEventListener('click', function() {
-                // 모달 닫기
-                const modal = bootstrap.Modal.getInstance(document.getElementById('feedbackModal'));
-                if (modal) {
-                    modal.hide();
-                }
-                
-                // 다음 디자인 선택
-                if (currentDesignId) {
-                    const designItems = document.querySelectorAll('.design-item');
-                    const designIds = Array.from(designItems).map(item => item.dataset.designId);
-                    const currentIndex = designIds.indexOf(currentDesignId);
+            
+            // 다음 디자인 버튼 이벤트 리스너
+            const nextDesignButton = document.getElementById('btn-next-design');
+            if (nextDesignButton) {
+                nextDesignButton.addEventListener('click', function() {
+                    // 모달 닫기
+                    const modal = bootstrap.Modal.getInstance(document.getElementById('feedbackModal'));
+                    if (modal) {
+                        modal.hide();
+                    }
                     
-                    if (currentIndex !== -1 && designIds.length > 1) {
-                        const nextIndex = (currentIndex + 1) % designIds.length;
-                        const nextDesignId = designIds[nextIndex];
+                    // 다음 디자인 선택
+                    if (window.currentDesignId) {
+                        const designItems = document.querySelectorAll('.design-item');
+                        const designIds = Array.from(designItems).map(item => item.dataset.designId);
+                        const currentIndex = designIds.indexOf(window.currentDesignId);
                         
-                        // 다음 디자인 선택
-                        const nextDesignItem = document.querySelector(`.design-item[data-design-id="${nextDesignId}"]`);
-                        if (nextDesignItem) {
-                            nextDesignItem.click();
-                            nextDesignItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        if (currentIndex !== -1 && designIds.length > 1) {
+                            const nextIndex = (currentIndex + 1) % designIds.length;
+                            const nextDesignId = designIds[nextIndex];
+                            
+                            // 다음 디자인 선택
+                            window.selectDesign(nextDesignId);
                         }
                     }
-                }
-            });
-        }
-    });
-    </script>
-    <script>
-        // ZMQ 상태 확인 기능 비활성화
-        document.addEventListener('DOMContentLoaded', function() {
-            const zmqStatusEl = document.getElementById('zmq-status');
-            if (zmqStatusEl) {
-                zmqStatusEl.innerHTML = 'ZMQ 상태 확인 비활성화됨';
-                zmqStatusEl.classList.remove('text-success', 'text-danger');
-                zmqStatusEl.classList.add('text-warning');
+                });
             }
             
-            // API 요청 에러 메시지 숨기기
-            window.addEventListener('error', function(event) {
-                if (event.message && event.message.includes('api/zmq/ping')) {
-                    console.log('ZMQ 상태 확인 오류 무시됨');
-                    event.preventDefault();
+            // 디자인 목록 로드
+            async function loadDesigns() {
+                if (!designList) return;
+                
+                try {
+                    // 로딩 표시
+                    designList.innerHTML = `
+                        <div class="list-group-item text-center py-5">
+                            <div class="spinner-border text-primary mb-2" role="status">
+                                <span class="visually-hidden">로딩 중...</span>
+                            </div>
+                            <p class="mb-0">디자인 목록을 불러오는 중...</p>
+                        </div>
+                    `;
+                    
+                    // API에서 디자인 가져오기
+                    const response = await fetch('/api/designs');
+                    const data = await response.json();
+                    
+                    if (data.status === 'success' && data.designs && data.designs.length > 0) {
+                        // 디자인 목록 HTML 생성
+                        let html = '';
+                        
+                        data.designs.forEach(design => {
+                            const designId = design.id || 'unknown';
+                            const reward = design.reward !== null ? parseFloat(design.reward).toFixed(4) : 'N/A';
+                            const timestamp = design.timestamp ? new Date(design.timestamp).toLocaleString() : 'N/A';
+                            
+                            // 액션 값 가져오기
+                            const action = design.action || [];
+                            const actionStr = action.length > 0 
+                                ? action.map(val => (val !== null ? parseFloat(val).toFixed(2) : 'N/A')).join(', ')
+                                : 'N/A';
+                            
+                            html += `
+                                <div class="list-group-item design-item" data-design-id="${designId}">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <div class="design-item-title">${designId.split('_')[0]}</div>
+                                            <div class="small">액션: ${actionStr}</div>
+                                            <div class="design-item-date">${timestamp}</div>
+                                        </div>
+                                        <div class="design-item-reward">${reward}</div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        
+                        // 목록에 HTML 삽입
+                        designList.innerHTML = html;
+                        
+                        // 클릭 이벤트 리스너 추가
+                        document.querySelectorAll('.design-item').forEach(item => {
+                            item.addEventListener('click', function() {
+                                const id = this.dataset.designId;
+                                window.selectDesign(id);
+                            });
+                        });
+                        
+                        // 첫 번째 디자인 자동 선택
+                        if (data.designs.length > 0) {
+                            window.selectDesign(data.designs[0].id);
+                        }
+                    } else {
+                        // 디자인이 없는 경우
+                        designList.innerHTML = `
+                            <div class="list-group-item text-center py-5">
+                                <i class="fa-solid fa-info-circle mb-2 fs-4 text-info"></i>
+                                <p class="mb-0">디자인 데이터가 없습니다.</p>
+                                <p class="small text-muted mt-2">디자인 데이터를 생성하거나 RLHF 기준 데이터를 가져오세요.</p>
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error('디자인 로드 중 오류:', error);
+                    
+                    // 오류 메시지 표시
+                    designList.innerHTML = `
+                        <div class="list-group-item text-center py-5">
+                            <div class="alert alert-danger mb-0">
+                                <i class="fa-solid fa-exclamation-circle me-1"></i>
+                                오류: 디자인 목록을 불러올 수 없습니다.
+                            </div>
+                            <p class="small text-muted mt-2">콘솔을 확인하세요: ${error.message}</p>
+                        </div>
+                    `;
                 }
-            });
+            }
+            
+            // 새로고침 버튼
+            const refreshButton = document.getElementById('btn-refresh');
+            if (refreshButton) {
+                refreshButton.addEventListener('click', () => {
+                    loadDesigns();
+                });
+            }
+            
+            // 초기 디자인 목록 로드
+            loadDesigns();
         });
-        </script>
+    </script>
 </body>
 </html>
