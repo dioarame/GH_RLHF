@@ -46,7 +46,7 @@ try:
     context = zmq.Context()
     socket = context.socket(zmq.PULL)
     socket.setsockopt(zmq.LINGER, 0)  # 명시적 linger 설정
-    bind_address = f"tcp://*:{port}"
+    bind_address = f"tcp://localhost:{port}"
     
     print(f"ZMQ PULL 소켓 바인딩 중: {bind_address}")
     socket.bind(bind_address)
