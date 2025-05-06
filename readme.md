@@ -1,208 +1,225 @@
 # Grasshopper RLHF System
 
-Human feedback collection system for reinforcement learning in Grasshopper 3D models.
+A comprehensive framework for Reinforcement Learning with Human Feedback (RLHF) in Grasshopper 3D modeling environments.
 
-## Project Structure
+## Overview
+
+This system enables the application of reinforcement learning techniques to parametric architectural designs created in Grasshopper, with a human feedback collection mechanism that helps refine the RL model based on human preferences and design expertise.
+
+The framework consists of:
+1. **Reinforcement Learning components** (Python) that interact with Grasshopper models
+2. **ZMQ communication layer** (C# + Python) for bidirectional data exchange
+3. **Human feedback interface** (Flask web application) for collecting design evaluations
+4. **Analysis tools** (Python) for processing and integrating feedback data
+
+## System Architecture
 
 ```
-C:\Users\valen\Desktop\Dev\6. RLHF\
-├─data
-│  ├─designs     # Design data storage
-│  ├─feedback    # User feedback storage
-│  ├─meshes      # 3D mesh data storage
-│  └─zmq_logs    # ZMQ communication logs
-├─python_modules
-│  ├─analyze_integrated_data.py  # Analysis module
-│  ├─env_simple.py               # RL environment
-│  ├─ppo_train.py                # PPO training
-│  └─zmq_state_receiver.py       # ZMQ state/reward receiver
-└─server
-   ├─static
-   │  ├─css
-   │  │  └─styles.css            # UI stylesheet
-   │  └─js
-   │     ├─design_manager.js     # Design management
-   │     ├─feedback_form.js      # Feedback collection
-   │     ├─main.js               # Main UI logic
-   │     ├─three_viewer.js       # 3D viewer
-   │     └─utils.js              # Utility functions
-   ├─templates
-   │  └─index.html               # Main UI template
-   └─app.py                      # Flask server
+┌───────────────┐           ┌───────────────┐          ┌───────────────┐
+│  Grasshopper  │◄──ZMQ────►│  Python RL    │◄────────►│  Human        │
+│  Environment  │           │  Environment   │          │  Feedback UI  │
+└───────────────┘           └───────────────┘          └───────────────┘
+    ▲                            ▲                          ▲
+    │                            │                          │
+    │                            │                          │
+    └────────────────────────────┴──────────────────────────┘
+                         Data Storage & Analysis
 ```
 
 ## Prerequisites
 
-1. **Software Requirements**
-   - Rhino 6/7 with Grasshopper
-   - Python 3.7 or higher
-   - Visual Studio (for C# components)
+### Software Requirements
+- Rhino 6/7 with Grasshopper
+- Python 3.7+ with required packages
+- Visual Studio for C# components (.NET Framework 4.8)
+- Git for version control
 
-2. **Python Packages**
-   ```bash
-   pip install flask zmq gymnasium stable-baselines3 torch werkzeug netmq numpy pandas matplotlib seaborn
-   ```
+### Installation of Python Dependencies
+```bash
+pip install flask zmq gymnasium stable-baselines3 torch werkzeug numpy pandas matplotlib seaborn
+```
 
-3. **Directory Setup**
-   ```bash
-   mkdir -p data/meshes data/designs data/feedback data/zmq_logs
-   mkdir -p server/static/css server/static/js server/templates
-   ```
+### Installation of C# Components
+1. Open the solution in Visual Studio
+2. Build the project to generate the DLL
+3. Convert the DLL to GHA format using Grasshopper Assembly Utility
+4. Place the GHA file in your Grasshopper Components folder
 
-## Components Installation
+## Project Structure
+
+```
+/ (root)
+├── data/
+│   ├── designs/     # Stored design parameters and metadata
+│   ├── feedback/    # Human feedback data
+│   ├── meshes/      # 3D mesh exports from Grasshopper
+│   └── zmq_logs/    # Communication logs for debugging
+│
+├── python_modules/
+│   ├── ppo_train.py             # PPO training script
+│   ├── env_simple.py            # Reinforcement learning environment
+│   ├── zmq_state_receiver.py    # Receiver for state and reward data
+│   ├── analyze_integrated_data.py # Analysis tools for RLHF data
+│   └── design_regenerator.py    # Utility to regenerate optimal designs
+│
+├── server/
+│   ├── app.py                   # Flask server for feedback collection
+│   ├── static/                  # Web UI static assets
+│   └── templates/               # HTML templates for feedback UI
+│
+└── src/                         # C# source code
+    ├── GrasshopperZmqComponent.sln # Visual Studio solution
+    └── GrasshopperZmqComponent/
+        ├── SliderInfoExporter.cs # Export slider ranges
+        ├── ZmqListener.cs        # Receive actions from Python
+        ├── ZmqStateSender.cs     # Send state/reward to Python
+        └── MeshExporter.cs       # Export 3D mesh data
+```
+
+## Components and Their Functions
 
 ### C# Grasshopper Components
 
-1. Compile the C# components in Visual Studio:
-   - SliderInfoExporter.cs
-   - ZmqListener.cs
-   - ZmqStateSender.cs
-   - MeshExporter.cs
+1. **SliderInfoExporter**
+   - Exports information about sliders (min, max, rounding values)
+   - Used by the RL environment to understand the action space
 
-2. Convert the compiled DLL to GHA format and place in Grasshopper Components folder:
-   - Typical path: `%APPDATA%\Grasshopper\Libraries`
+2. **ZmqListener**
+   - Receives action arrays from Python via ZMQ
+   - Updates Grasshopper number sliders based on received actions
 
-## Execution Sequence
+3. **ZmqStateSender**
+   - Sends current state and reward values to Python
+   - Transmits design state for RL training
 
-### 1. Prepare Grasshopper Environment
+4. **MeshExporter**
+   - Exports 3D mesh data from Grasshopper
+   - Provides geometry for visualization in the feedback UI
 
-1. Open Rhino and load your Grasshopper file (e.g., `C:/Users/valen/Desktop/Dev/AS_B.gh`)
-2. Add the following components to your canvas:
-   - SliderInfoExporter: Exports slider information
-   - ZmqListener: Receives actions from Python (5556 port)
-   - ZmqStateSender: Sends state/reward data to Python (5557 port)
-   - MeshExporter: Exports 3D meshes (5558 port)
-3. Configure components:
-   - ZmqListener: Set `Run` to `True`, Address to `tcp://localhost:5556`
-   - ZmqStateSender: Set `Run` to `True`, Address to `tcp://localhost:5557`
-   - MeshExporter: Set `Run` to `True`, Address to `tcp://localhost:5558`
+### Python Modules
 
-### 2. Run Reinforcement Learning Pipeline
+1. **env_simple.py**
+   - Implements a Gymnasium environment for RL
+   - Communicates with Grasshopper via ZMQ
 
-#### 2.1. Start State/Reward Receiver
+2. **ppo_train.py**
+   - Implementation of Proximal Policy Optimization algorithm
+   - Learns optimal slider values for design objectives
+
+3. **zmq_state_receiver.py**
+   - Receives and logs state/reward data during training
+   - Creates datasets for analysis
+
+4. **analyze_integrated_data.py**
+   - Analyzes training results and generates reference data
+   - Clusters designs and identifies optimal solutions
+
+5. **design_regenerator.py**
+   - Recreates optimal designs for feedback collection
+   - Sends actions to Grasshopper via ZMQ
+
+### Web Interface
+
+The feedback collection system is powered by a Flask web application that:
+- Displays 3D models of generated designs
+- Provides rating scales for different design aspects
+- Collects textual comments and evaluations
+- Manages sessions and design exploration
+
+## Workflow
+
+### 1. Prepare the Grasshopper Environment
+
+1. Create your parametric design in Grasshopper
+2. Add the RLHF components to your canvas:
+   - SliderInfoExporter: Connect to sliders you want to control
+   - ZmqListener: Set port to 5556 for receiving actions
+   - ZmqStateSender: Set port to 5557 for sending state/reward
+   - MeshExporter: Set port to 5558 for exporting meshes
+
+### 2. Run Reinforcement Learning Training
 
 ```bash
-cd C:\Users\valen\Desktop\Dev\6. RLHF
-python python_modules\zmq_state_receiver.py
+# Start the state/reward receiver
+python python_modules/zmq_state_receiver.py
+
+# In a new terminal, start the PPO training
+python python_modules/ppo_train.py --gh-path "path/to/your/definition.gh" --steps 10000
 ```
 
-This script listens for state and reward data from Grasshopper on port 5557 and saves it to JSON files in the `data/zmq_logs` directory.
-
-#### 2.2. Run PPO Training
+### 3. Analyze Results and Generate Reference Designs
 
 ```bash
-cd C:\Users\valen\Desktop\Dev\6. RLHF
-python python_modules\ppo_train.py --gh-path "C:/Users/valen/Desktop/Dev/AS_B.gh" --compute-url "http://localhost:6500/grasshopper" --port 5556 --steps 1000
+# Analyze the collected data
+python python_modules/analyze_integrated_data.py
+
+# Regenerate top designs for feedback
+python python_modules/design_regenerator.py --feedback-session 1
 ```
 
-Parameters:
-- `--gh-path`: Path to your Grasshopper definition file
-- `--compute-url`: URL of Rhino.Compute server
-- `--port`: ZMQ port for sending actions (should match ZmqListener port)
-- `--steps`: Number of training steps
-
-#### 2.3. Analyze Results
+### 4. Collect Human Feedback
 
 ```bash
-cd C:\Users\valen\Desktop\Dev\6. RLHF
-python python_modules\analyze_integrated_data.py --state-reward-log "data\zmq_logs\state_reward_log_YYYYMMDD_HHMMSS.json"
-```
-
-Replace `YYYYMMDD_HHMMSS` with the actual timestamp of the log file created by zmq_state_receiver.py. This script analyzes the state/reward data and generates reference data for the human feedback system.
-
-### 3. Human Feedback Collection
-
-#### 3.1. Start Flask Server
-
-```bash
-cd C:\Users\valen\Desktop\Dev\6. RLHF\server
+# Start the feedback server
+cd server
 python app.py
 ```
 
-The Flask server will start on port 5000 and provide the web interface for human feedback collection.
+Then open http://localhost:5000 in your browser to access the feedback interface.
 
-#### 3.2. Access Web Interface
+## ZMQ Port Configuration
 
-Open a web browser and navigate to:
-```
-http://localhost:5000
-```
+The system uses several ZMQ ports for communication:
 
-#### 3.3. Provide Feedback
+- **5556**: Action transmission (Python → Grasshopper)
+- **5557**: State/reward transmission (Grasshopper → Python)
+- **5558**: Mesh data requests (Web UI ↔ Grasshopper)
 
-1. Select a design from the list on the left
-2. Explore the 3D model using the viewer
-3. Rate the design using the sliders on the right
-4. Add optional comments
-5. Submit your feedback
-6. Continue with the next design
-
-## Data Flow
-
-1. **RL Training Data Flow**:
-   - Grasshopper (ZmqListener) ← Actions ← PPO Training
-   - Grasshopper (ZmqStateSender) → State/Reward → ZmqStateReceiver
-
-2. **Analysis Data Flow**:
-   - ZmqStateReceiver → Log Files → Analysis Module
-   - Analysis Module → Reference Data → Feedback System
-
-3. **Feedback Collection Data Flow**:
-   - Grasshopper (MeshExporter) → Mesh Data → Flask Server
-   - Flask Server → Web Interface → Human User
-   - Human User → Feedback → Flask Server → Feedback Files
-
-## Port Usage
-
-- **5556**: PPO actions to Grasshopper (PUSH/PULL)
-- **5557**: State/reward data from Grasshopper (PUSH/PULL)
-- **5558**: Mesh data from Grasshopper (REQ/REP)
-- **5000**: Flask web server (HTTP)
+These can be configured via command-line arguments in the Python scripts.
 
 ## Troubleshooting
 
-### 1. ZMQ Connection Issues
+### Common Issues
 
-If ZMQ connections fail:
-- Ensure all ports are available (not used by other applications)
-- Check that Grasshopper components have `Run` set to `True`
-- Verify ZMQ address format (`tcp://localhost:PORT`)
-- Restart Rhino/Grasshopper
+1. **ZMQ Connection Failures**
+   - Ensure all ports are available and not blocked by firewalls
+   - Check that all components are properly initialized with 'Run' set to True
+   - Verify the address format is correct (e.g., tcp://localhost:5556)
 
-### 2. Rhino.Compute Issues
+2. **Grasshopper Responsiveness**
+   - If Grasshopper becomes unresponsive, try reducing the step rate in ppo_train.py
+   - Large models may require more time between actions
 
-If Rhino.Compute fails to connect:
-- Ensure Rhino.Compute server is running
-- Check that the URL is correct
-- Verify Grasshopper file path
+3. **Mesh Export Problems**
+   - Ensure your geometry is valid and properly connected to the MeshExporter
+   - Check the server logs for JSON formatting errors
 
-### 3. Mesh Export Issues
+## Extending the System
 
-If 3D meshes fail to load:
-- Check MeshExporter connections in Grasshopper
-- Ensure the mesh exists and is valid
-- Inspect Flask server logs for errors
+### Adding Custom Reward Functions
 
-### 4. Flask Server Issues
+Modify your Grasshopper definition to compute custom rewards based on:
+- Design performance metrics (structural, environmental, etc.)
+- Geometric properties (volume, surface area, etc.)
+- Any other quantifiable design objectives
 
-If Flask server fails to start:
-- Check for port conflicts (default: 5000)
-- Verify required packages are installed
-- Check Python version compatibility
+### Creating New Analysis Tools
 
-## Customizing for Different Grasshopper Files
+The modular nature of the system allows for custom analysis workflows:
+```python
+# Example of adding a new analysis function
+def analyze_spatial_quality(reference_data):
+    # Your custom analysis code here
+    return spatial_metrics
+```
 
-To use the system with different Grasshopper files:
+### Multiple Feedback Sessions
 
-1. **Adjust Parameter Names**:
-   - Modify `env_simple.py` to match your Grasshopper component parameter names
-   - Ensure `state_output_param_name` and `reward_output_param_name` match your design
-
-2. **Update Mesh Connections**:
-   - Connect MeshExporter to your 3D mesh objects
-
-3. **Configure Training**:
-   - Update the `--gh-path` parameter when running `ppo_train.py`
+For larger studies with multiple participants:
+```bash
+# Create session-specific designs
+python python_modules/design_regenerator.py --feedback-session 2
+```
 
 ## License
 
@@ -210,6 +227,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- Grasshopper and Rhino3D by Robert McNeel & Associates
-- Stable-Baselines3 for reinforcement learning algorithms
-- Three.js for 3D visualization
+- This system builds on the ZMQ communication framework for Grasshopper
+- PPO implementation based on Stable-Baselines3
+- 3D visualization powered by Three.js
