@@ -220,7 +220,8 @@ def test_zmq_push_connection(port, test_actions=None):
 
 # 학습 속도 조절 및 체크포인트 콜백 클래스 (확장됨)
 class TrainingCallback(BaseCallback):
-    def __init__(self, limit_fps, checkpoint_freq=0, checkpoint_prefix="ppo_checkpoint"):
+    # ppo_train.py의 TrainingCallback 클래스에 추가
+    def __init__(self, limit_fps, checkpoint_freq=0, checkpoint_prefix="ppo_checkpoint", random_actions_steps=1000):
         super().__init__(verbose=0)
         self.limit_fps = min(limit_fps, 5.0)  # 최대 5 FPS로 제한
         self.min_interval = 1.0 / self.limit_fps if self.limit_fps > 0 else 0
@@ -229,21 +230,42 @@ class TrainingCallback(BaseCallback):
         self.checkpoint_freq = checkpoint_freq
         self.checkpoint_prefix = checkpoint_prefix
         self.checkpoint_count = 0
+        
+        # 무작위 액션 관련 변수 추가
+        self.random_actions_steps = random_actions_steps  # 무작위 액션 사용 스텝 수
+        self.random_actions_count = 0  # 현재까지 사용한 무작위 액션 수
+        
         print(f"  속도 제한: {self.limit_fps} steps/sec (최소 간격: {self.min_interval:.3f}초)")
         if checkpoint_freq > 0:
             print(f"  체크포인트 간격: {checkpoint_freq} 스텝마다 저장")
-
-    def _on_training_start(self) -> None:
-        self.start_time = time.time()
-        self.last_time = time.time()
+        print(f"  초기 무작위 액션: {random_actions_steps} 스텝")
 
     def _on_step(self) -> bool:
         current_time = time.time()
         elapsed = current_time - self.last_time
+        total_elapsed = current_time - self.start_time
+        
+        # 무작위 액션 사용 여부 확인
+        use_random = self.random_actions_count < self.random_actions_steps
+        
+        if use_random:
+            # 모델의 predict 메서드를 재정의하여 무작위 액션 사용
+            original_predict = self.model.predict
+            
+            def random_predict(observation, state=None, episode_start=None, deterministic=False):
+                action = self.model.env.action_space.sample()
+                return action, state
+            
+            self.model.predict = random_predict
+            self.random_actions_count += 1
+            
+            # 로깅
+            if self.random_actions_count % 100 == 0 or self.random_actions_count == 1:
+                steps_per_sec = self.num_timesteps / total_elapsed if total_elapsed > 0 else 0
+                print(f"무작위 액션 사용 중: {self.random_actions_count}/{self.random_actions_steps} ({steps_per_sec:.2f} steps/sec)")
         
         # 로깅
         if self.num_timesteps > 0 and self.num_timesteps % 10 == 0:
-            total_elapsed = current_time - self.start_time
             steps_per_sec = self.num_timesteps / total_elapsed if total_elapsed > 0 else 0
             print(f"🔄 스텝 {self.num_timesteps}/{self.locals.get('total_timesteps', '?')}: {steps_per_sec:.2f} steps/sec")
 
@@ -259,6 +281,11 @@ class TrainingCallback(BaseCallback):
             wait_time = self.min_interval - elapsed
             if wait_time > 0: time.sleep(wait_time)
         self.last_time = time.time()
+        
+        # 무작위 액션 모드였으면 원래 predict 메서드로 복원
+        if use_random:
+            self.model.predict = original_predict
+        
         return True
 
 # 시그널 핸들러 설정 (추가됨)
@@ -378,6 +405,44 @@ def main():
         except Exception as e:
             print(f"❌ 로깅 콜백 생성 실패: {e}")
             logging_callback = None
+        
+        # PPO 환경 생성 전, 강화된 무작위 탐색 단계 추가
+        print("\n[+] 강화된 무작위 탐색 단계 시작...")
+        for ep in range(20):  # 20 에피소드 동안
+            obs, _ = env.reset()
+            done = False
+            steps = 0
+            while not done and steps < 50:  # 각 에피소드 최대 50 스텝
+                # 매우 극단적인 값을 포함하는 무작위 액션 생성
+                action = np.zeros(env.action_space.shape)
+                for i in range(len(action)):
+                    # 1/3 확률로 경계값, 2/3 확률로 균등 분포
+                    if np.random.random() < 0.33:
+                        # 경계값 (-10, -5, 0, 5, 10 중 하나)
+                        action[i] = np.random.choice([-10, -5, 0, 5, 10])
+                    else:
+                        # 전체 범위에서 균등 분포
+                        action[i] = np.random.uniform(
+                            env.action_space.low[i], 
+                            env.action_space.high[i]
+                        )
+                    
+                    # 정수 슬라이더인 경우 반올림
+                    if env.slider_roundings[i] == 1.0:
+                        action[i] = int(round(action[i]))
+                
+                # 100 스텝마다 로깅
+                if steps % 5 == 0:
+                    print(f"  에피소드 {ep+1}, 스텝 {steps+1}: 액션 = {action}")
+                
+                obs, reward, done, truncated, info = env.step(action)
+                steps += 1
+                if done:
+                    break
+            
+            print(f"  에피소드 {ep+1} 완료: {steps} 스텝")
+
+        print("[+] 강화된 무작위 탐색 완료. PPO 학습 시작.")
 
         # 6. PPO 모델 생성
         print("\n[4/5] PPO 모델 생성 중...")
@@ -396,7 +461,7 @@ def main():
                 gamma=0.99,
                 gae_lambda=0.95,
                 clip_range=0.2,
-                ent_coef=0.01,  # 더 큰 엔트로피 계수 (탐색 증가)
+                ent_coef=0.1,  # 더 큰 엔트로피 계수 (탐색 증가)
                 # tensorboard_log="./ppo_gh_tensorboard/"
             )
             print("✅ PPO 모델이 성공적으로 생성되었습니다.")
@@ -418,9 +483,12 @@ def main():
             if CHECKPOINT_FREQ > 0:
                 print(f"  체크포인트 빈도: {CHECKPOINT_FREQ} 스텝마다")
 
-            # 콜백 리스트 생성
-            callbacks_list = [TrainingCallback(STEPS_PER_SECOND, checkpoint_freq=CHECKPOINT_FREQ, 
-                                              checkpoint_prefix=f"ppo_grasshopper_checkpoint_{time.strftime('%Y%m%d_%H%M%S')}")]
+            # 콜백 리스트 생성 부분 수정
+            callbacks_list = [TrainingCallback(STEPS_PER_SECOND, 
+                                            checkpoint_freq=CHECKPOINT_FREQ, 
+                                            checkpoint_prefix=f"ppo_grasshopper_checkpoint_{time.strftime('%Y%m%d_%H%M%S')}",
+                                            random_actions_steps=2000)]  # 처음 2000 스텝은 완전히 무작위 액션 사용
+
             if logging_callback:
                 callbacks_list.append(logging_callback)
                 print("  데이터 로깅 콜백 활성화됨.")
