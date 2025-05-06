@@ -74,7 +74,36 @@ class SimpleGrasshopperEnv(gym.Env):
         # 초기화 진행
         self._initialize_gh_slider_info()
         self._init_zmq_server()
-
+        
+    def _scale_actions(self, action_values):
+        """액션 값을 슬라이더 전체 범위로 확장"""
+        # 액션이 스칼라인 경우 리스트로 변환
+        if not isinstance(action_values, (list, np.ndarray)):
+            action_values = [action_values]
+            
+        scaled_actions = []
+        
+        for i, act in enumerate(action_values):
+            if i < len(self.action_space.low):
+                low = self.action_space.low[i]
+                high = self.action_space.high[i]
+                
+                # PPO 출력 값의 가정된 범위
+                assumed_low = -3.0
+                assumed_high = 3.0
+                
+                # 스케일링: PPO 범위 -> 슬라이더 범위
+                normalized = (act - assumed_low) / (assumed_high - assumed_low)  # 0~1로 정규화
+                scaled = low + normalized * (high - low)  # 슬라이더 범위로 확장
+                
+                # 범위 내로 제한
+                scaled = max(low, min(high, scaled))
+                scaled_actions.append(scaled)
+            else:
+                scaled_actions.append(act)
+        
+        return np.array(scaled_actions)
+    
     def _parse_multiple_slider_info(self, data_raw):
         slider_infos = []
         print(f"\n[슬라이더 파싱] 원본 데이터: '{data_raw}'")
@@ -349,12 +378,113 @@ class SimpleGrasshopperEnv(gym.Env):
             except Exception as e:
                 print(f"ZMQ 컨텍스트 종료 오류: {e}")
             self.zmq_context = None
+    
+    def _scale_actions(self, action_values):
+        """액션 값을 슬라이더 전체 범위로 더 공격적으로 확장"""
+        if not isinstance(action_values, (list, np.ndarray)):
+            action_values = [action_values]
+            
+        scaled_actions = []
+        
+        for i, act in enumerate(action_values):
+            if i < len(self.action_space.low):
+                low = self.action_space.low[i]
+                high = self.action_space.high[i]
+                
+                # PPO 출력 값의 가정된 범위를 더 좁게 설정
+                assumed_low = -1.0  # 더 좁은 범위
+                assumed_high = 1.0  # 더 좁은 범위
+                
+                # 무작위성 추가 (20%의 확률로)
+                if np.random.random() < 0.2:
+                    # 완전히 무작위 값 또는 경계값 사용
+                    if np.random.random() < 0.5:
+                        # 완전 무작위
+                        scaled = np.random.uniform(low, high)
+                    else:
+                        # 경계값 근처
+                        boundary = low if np.random.random() < 0.5 else high
+                        margin = (high - low) * 0.1
+                        if boundary == low:
+                            scaled = np.random.uniform(low, low + margin)
+                        else:
+                            scaled = np.random.uniform(high - margin, high)
+                else:
+                    # 정규화 및 스케일링 (더 공격적으로)
+                    # 값이 범위 안에 있는지 확인하고 한계 설정
+                    act_limited = max(assumed_low, min(assumed_high, act))
+                    
+                    # 정규화 후 스케일링
+                    normalized = (act_limited - assumed_low) / (assumed_high - assumed_low)
+                    scaled = low + normalized * (high - low)
+                
+                # 정수 슬라이더 처리
+                rounding = self.slider_roundings[i] if i < len(self.slider_roundings) else 0.01
+                if rounding == 1.0:
+                    scaled = int(round(scaled))
+                
+                scaled_actions.append(scaled)
+            else:
+                scaled_actions.append(act)
+        
+        # 디버그 출력 추가 (100번에 1번)
+        if not hasattr(self, '_scale_counter'):
+            self._scale_counter = 0
+        self._scale_counter += 1
+        
+        if self._scale_counter % 100 == 0:
+            print(f"\n스케일링: {action_values} -> {scaled_actions}")
+        
+        return np.array(scaled_actions)
 
     def _send_action_to_grasshopper(self, action_values):
         """액션 값을 Grasshopper로 전송 (라운딩 정밀도 수정 버전)"""
         # 액션이 스칼라인 경우 리스트로 변환
         if not isinstance(action_values, (list, np.ndarray)):
             action_values = [action_values]
+        
+        # 향상된 스케일링 적용
+        scaled_actions = []
+        for i, act in enumerate(action_values):
+            if i < len(self.action_space.low):
+                low = self.action_space.low[i]
+                high = self.action_space.high[i]
+                rounding = self.slider_roundings[i] if i < len(self.slider_roundings) else 0.01
+                
+                # 적극적인 스케일링 적용
+                # 더 좁은 입력 범위 가정(-1.5 ~ 1.5)으로 확장 효과 증가
+                assumed_low = -1.5
+                assumed_high = 1.5
+                
+                # 랜덤 요소 추가 (10%의 확률로)
+                if np.random.random() < 0.1:
+                    # 10%의 확률로 완전히 무작위 값 사용
+                    scaled = low + np.random.random() * (high - low)
+                else:
+                    # 값이 범위 내에 있는지 확인
+                    act_limited = max(assumed_low, min(assumed_high, act))
+                    
+                    # 정수 슬라이더는 더 공격적인 스케일링 적용
+                    if rounding == 1.0:  # 정수 슬라이더
+                        # 범위를 더 적극적으로 이용하기 위해 추가 스케일링
+                        expansion_factor = 1.5
+                        act_limited *= expansion_factor
+                        act_limited = max(assumed_low, min(assumed_high, act_limited))
+                    
+                    # 정규화 및 스케일링
+                    normalized = (act_limited - assumed_low) / (assumed_high - assumed_low)
+                    scaled = low + normalized * (high - low)
+                
+                scaled_actions.append(scaled)
+            else:
+                scaled_actions.append(act)
+        
+        scaled_actions = np.array(scaled_actions)
+        
+        # 디버그 출력 (100번에 1번)
+        if self._send_counter % 100 == 0:
+            print(f"\n원본 액션: {action_values}")
+            print(f"스케일링 후: {scaled_actions}")
         
         # Clipping 및 라운딩 처리
         clipped_action = np.clip(action_values, self.action_space.low, self.action_space.high)
