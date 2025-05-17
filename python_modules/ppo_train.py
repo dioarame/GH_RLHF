@@ -133,16 +133,33 @@ def parse_args():
                         help='ZMQ 서버 포트 (Python Bind)')
     parser.add_argument('--steps', type=int, default=100,
                         help='학습할 총 타임스텝 수 (기본값: 100)')
-    parser.add_argument('--fps', type=float, default=2.0,
-                        help='초당 처리할 최대 스텝 수 (기본값: 2.0)')
+    parser.add_argument('--fps', type=float, default=0.15,  # FPS 더 낮게 설정 (4초 처리 시간 고려)
+                        help='초당 처리할 최대 스텝 수 (기본값: 0.15)')
     parser.add_argument('--test-only', action='store_true',
                         help='학습 없이 ZMQ 통신 테스트만 수행')
     parser.add_argument('--log-path', type=str, default=os.path.join("logs", f"ppo_log_{time.strftime('%Y%m%d_%H%M%S')}.csv"),
                         help='데이터 로그 CSV 파일 경로')
     parser.add_argument('--device', type=str, choices=['auto', 'cuda', 'cpu'], default='auto',
                         help='학습 디바이스 (auto=자동감지, cuda=GPU, cpu=CPU) (기본값: auto)')
-    parser.add_argument('--checkpoint-freq', type=int, default=0,
-                        help='체크포인트 저장 주기 (스텝) - 0이면 비활성화 (기본값: 0)')
+    parser.add_argument('--checkpoint-freq', type=int, default=50,  # 더 자주 체크포인트 저장
+                        help='체크포인트 저장 주기 (스텝) - 0이면 비활성화 (기본값: 50)')
+    parser.add_argument('--computation-delay', type=float, default=4.0,  # 계산 지연 시간 기본값 4초
+                        help='Grasshopper 계산 대기 시간 (초) (기본값: 4.0)')
+                        
+    # 보상 함수 매개변수 추가
+    parser.add_argument('--bcr-limit', type=float, default=0.6,
+                        help='BCR 법적 한도 (기본값: 0.6, 60%)')
+    parser.add_argument('--far-limit', type=float, default=4.0,
+                        help='FAR 법적 한도 (기본값: 4.0, 400%)')
+    parser.add_argument('--bcr-weight', type=float, default=1.0,
+                        help='BCR 보상 가중치 (기본값: 1.0)')
+    parser.add_argument('--far-weight', type=float, default=1.5, 
+                        help='FAR 보상 가중치 (기본값: 1.5)')
+    parser.add_argument('--sunlight-weight', type=float, default=2.0,
+                        help='일조량 보상 가중치 (기본값: 2.0)')
+    parser.add_argument('--other-weight', type=float, default=0.5,
+                        help='기타 지표 보상 가중치 (기본값: 0.5)')
+                        
     return parser.parse_args()
 
 # Rhino.Compute 서버 상태 확인 함수
@@ -371,17 +388,30 @@ def main():
                 raise FileNotFoundError(f"Grasshopper 파일을 찾을 수 없습니다: {GH_DEFINITION_PATH}")
 
             print(f"  ZMQ 서버 포트: {ZMQ_SERVER_PORT}")
+            print(f"  Grasshopper 계산 대기 시간: {args.computation_delay}초")
+            print(f"  BCR 한도: {args.bcr_limit*100:.1f}%, 가중치: {args.bcr_weight}")
+            print(f"  FAR 한도: {args.far_limit*100:.1f}%, 가중치: {args.far_weight}")
+            print(f"  일조량 가중치: {args.sunlight_weight}")
 
             env = SimpleGrasshopperEnv(
                 compute_url=COMPUTE_URL,
                 gh_definition_path=GH_DEFINITION_PATH,
-                state_output_param_name="CurrentState",
-                reward_output_param_name="CalculatedReward",
+                state_output_param_name="DesignState",  # Grasshopper에서 사용할 상태 파라미터 이름
+                # reward_output_param_name은 제거됨 - 내부 보상 함수 사용
                 slider_info_param_name="SliderInfo",
                 max_episode_steps=100,
                 action_push_port=ZMQ_SERVER_PORT,
-                use_push_mode=True  # 항상 PUSH 모드만 사용
+                use_push_mode=True,
+                computation_delay=args.computation_delay,
+                # 보상 함수 매개변수 전달
+                bcr_limit=args.bcr_limit,
+                far_limit=args.far_limit,
+                bcr_weight=args.bcr_weight,
+                far_weight=args.far_weight,
+                sunlight_weight=args.sunlight_weight,
+                other_weight=args.other_weight
             )
+
 
             print("✅ 환경이 성공적으로 생성되었습니다.")
             print(f"   - Action Space: {env.action_space}")

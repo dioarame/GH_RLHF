@@ -233,6 +233,14 @@ def regenerate_top_designs(reference_data, top_n=3, session_id=1):
             print("  경고: 액션 값이 없습니다. 건너뜁니다.")
             continue
         
+        # 상태 값 추출 (건축 지표)
+        state_values = design.get("state", [])
+        if len(state_values) >= 3:
+            bcr = state_values[0]
+            far = state_values[1]
+            sunlight = state_values[2]
+            print(f"  건축 지표: BCR={bcr*100:.1f}%, FAR={far*100:.1f}%, 일조량={sunlight:.3f}")
+        
         # 액션 값 디버그 출력
         print(f"  액션 값: {action_values}")
         print(f"  보상: {design.get('reward', 'N/A')}")
@@ -241,9 +249,9 @@ def regenerate_top_designs(reference_data, top_n=3, session_id=1):
         success = send_action_to_grasshopper(action_values)
         
         if success:
-            # 그래스호퍼가 처리할 시간 부여
-            print("  그래스호퍼가 처리할 시간 부여 중...")
-            time.sleep(1.0)
+            # 그래스호퍼가 처리할 시간 부여 (건축 계산에 더 많은 시간 필요)
+            print(f"  그래스호퍼가 처리할 시간 부여 중 (4초)...")
+            time.sleep(4.0)
             
             # 세션 ID를 포함한 파일명 생성
             custom_filename = f"top_design_{i+1}_session{session_id}"
@@ -256,18 +264,24 @@ def regenerate_top_designs(reference_data, top_n=3, session_id=1):
                 designs_dir = os.path.join(project_root, "data", "designs")
                 os.makedirs(designs_dir, exist_ok=True)
                 
+                # 건축 지표 추가
                 design_info = {
                     "id": custom_filename,
                     "timestamp": int(time.time() * 1000),
                     "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "action": action_values,
-                    "state": design.get("state", []),
+                    "state": state_values,
                     "reward": design.get("reward", 0.0),
                     "mesh_file": os.path.basename(mesh_file),
                     "reference": True,
                     "type": "top",
                     "rank": i + 1,
-                    "feedback_session": session_id  # 세션 ID 추가
+                    "feedback_session": session_id,  # 세션 ID 추가
+                    "architecture_metrics": {
+                        "bcr": state_values[0] if len(state_values) > 0 else None,
+                        "far": state_values[1] if len(state_values) > 1 else None,
+                        "sunlight": state_values[2] if len(state_values) > 2 else None
+                    }
                 }
                 
                 design_file = os.path.join(designs_dir, f"{custom_filename}.json")
@@ -359,22 +373,24 @@ def regenerate_diverse_designs(reference_data):
 def main():
     parser = argparse.ArgumentParser(description='최적 디자인 재생성 및 메시 내보내기')
     parser.add_argument('--session-dir', type=str, default=None,
-                        help='분석 세션 디렉토리 경로 (지정하지 않으면 최신 디렉토리 사용)')
+                      help='분석 세션 디렉토리 경로 (지정하지 않으면 최신 디렉토리 사용)')
     parser.add_argument('--action-port', type=int, default=5556,
-                        help='ZMQ 액션 전송 포트 (기본값: 5556)')
+                      help='ZMQ 액션 전송 포트 (기본값: 5556)')
     parser.add_argument('--mesh-port', type=int, default=5558,
-                        help='ZMQ 메시 내보내기 포트 (기본값: 5558)')
+                      help='ZMQ 메시 내보내기 포트 (기본값: 5558)')
     parser.add_argument('--top-n', type=int, default=3,
-                        help='재생성할 최적 디자인 개수 (기본값: 3)')
+                      help='재생성할 최적 디자인 개수 (기본값: 3)')
     parser.add_argument('--regenerate-top', action='store_true',
-                        help='최적 디자인만 재생성')
+                      help='최적 디자인만 재생성')
     parser.add_argument('--regenerate-diverse', action='store_true',
-                        help='다양한 디자인만 재생성')
-    # 피드백 세션 번호 인자 추가
+                      help='다양한 디자인만 재생성')
     parser.add_argument('--feedback-session', type=int, default=None,
                       help='현재 인간 피드백 세션 번호 (지정하지 않으면 입력 요청)')
-    
-    args = parser.parse_args()
+    # 건축 제한 추가
+    parser.add_argument('--bcr-limit', type=float, default=0.6,
+                      help='건폐율(BCR) 제한 (기본값: 0.6, 60%)')
+    parser.add_argument('--far-limit', type=float, default=4.0, 
+                      help='용적률(FAR) 제한 (기본값: 4.0, 400%)')
     
     args = parser.parse_args()
     
@@ -392,6 +408,7 @@ def main():
                 print("숫자를 입력해주세요.")
     
     print(f"\n=== 인간 피드백 세션 #{feedback_session} 디자인 재생성 시작 ===\n")
+    print(f"건축 제한: BCR {args.bcr_limit*100:.1f}%, FAR {args.far_limit*100:.1f}%")
     
     # 기본값: 모든 디자인 재생성
     regenerate_top = args.regenerate_top

@@ -63,10 +63,28 @@ class RLHFDataAnalyzer:
         try:
             print(f"ZMQ 데이터 파일 로드 중: {self.state_reward_log_path}")
             
-            # JSON 파일 수정 (훼손된 JSON 파일 처리)
-            with open(self.state_reward_log_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # 먼저 바이너리 모드로 파일 읽기 시도
+            with open(self.state_reward_log_path, 'rb') as f:
+                binary_content = f.read()
+                
+            # 여러 인코딩 방식 시도
+            encodings_to_try = ['utf-8', 'cp949', 'euc-kr', 'latin1']
+            content = None
             
+            for encoding in encodings_to_try:
+                try:
+                    content = binary_content.decode(encoding, errors='replace')
+                    print(f"파일을 '{encoding}' 인코딩으로 성공적으로 로드했습니다.")
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if content is None:
+                # 마지막 시도로 latin1 인코딩 사용 (항상 성공함)
+                content = binary_content.decode('latin1')
+                print(f"모든 인코딩 시도 실패. 'latin1'으로 대체하여 로드했습니다.")
+            
+            # 나머지 코드는 동일하게 유지
             # JSON 배열의 끝을 찾아서 적절하게 처리
             if not content.strip().endswith("]"):
                 print("경고: JSON 파일이 올바르게 닫히지 않았습니다. 파일을 수정합니다.")
@@ -221,6 +239,117 @@ class RLHFDataAnalyzer:
         self.action_dim = len(action_cols)
         
         print(f"상태 차원: {self.state_dim}, 액션 차원: {self.action_dim}")
+
+    def analyze_architecture_metrics(self):
+        """건축 설계 최적화 관련 지표 분석"""
+        if self.zmq_data_filtered.empty:
+            print("분석할 데이터가 없습니다.")
+            return None, None
+
+        # 상태 데이터 추출
+        state_cols = [col for col in self.zmq_data_filtered.columns if col.startswith('state_')]
+        if len(state_cols) < 3:
+            print("건축 지표 분석에 필요한 상태 차원이 부족합니다.")
+            return None, None
+
+        # 건축 지표 설정
+        bcr_col = 'state_0'  # 건폐율
+        far_col = 'state_1'  # 용적률
+        sunlight_col = 'state_2'  # 일조량
+
+        # 법적 제한
+        bcr_limit = 0.6  # 60%
+        far_limit = 4.0  # 400%
+
+        # 지표 계산
+        metrics = {
+            'bcr_avg': self.zmq_data_filtered[bcr_col].mean(),
+            'far_avg': self.zmq_data_filtered[far_col].mean(),
+            'sunlight_avg': self.zmq_data_filtered[sunlight_col].mean(),
+            'bcr_max': self.zmq_data_filtered[bcr_col].max(),
+            'far_max': self.zmq_data_filtered[far_col].max(),
+            'sunlight_max': self.zmq_data_filtered[sunlight_col].max(),
+            'bcr_violations': (self.zmq_data_filtered[bcr_col] > bcr_limit).sum(),
+            'bcr_violation_rate': (self.zmq_data_filtered[bcr_col] > bcr_limit).mean() * 100,
+            'far_violations': (self.zmq_data_filtered[far_col] > far_limit).sum(),
+            'far_violation_rate': (self.zmq_data_filtered[far_col] > far_limit).mean() * 100,
+        }
+
+        # 상관관계 분석
+        corr_matrix = self.zmq_data_filtered[[bcr_col, far_col, sunlight_col, 'reward']].corr()
+
+        # 결과 출력
+        print("\n=== 건축 설계 지표 분석 ===")
+        print(f"건폐율(BCR) 평균: {metrics['bcr_avg']*100:.2f}% (최대: {metrics['bcr_max']*100:.2f}%)")
+        print(f"용적률(FAR) 평균: {metrics['far_avg']*100:.2f}% (최대: {metrics['far_max']*100:.2f}%)")
+        print(f"일조량 평균: {metrics['sunlight_avg']:.3f} (최대: {metrics['sunlight_max']:.3f})")
+        print(f"건폐율 법적 제한({bcr_limit*100:.0f}%) 위반: {metrics['bcr_violations']}회 ({metrics['bcr_violation_rate']:.1f}%)")
+        print(f"용적률 법적 제한({far_limit*100:.0f}%) 위반: {metrics['far_violations']}회 ({metrics['far_violation_rate']:.1f}%)")
+
+        print("\n상관관계 분석:")
+        print(corr_matrix)
+
+        # 시각화
+        plt.figure(figsize=(12, 10))
+
+        # 1. 건폐율과 용적률의 산점도 (일조량으로 색상 표시)
+        plt.subplot(2, 2, 1)
+        scatter = plt.scatter(
+            self.zmq_data_filtered[bcr_col] * 100,
+            self.zmq_data_filtered[far_col] * 100,
+            c=self.zmq_data_filtered[sunlight_col],
+            cmap='viridis',
+            alpha=0.7
+        )
+        plt.colorbar(scatter, label='일조량')
+        plt.axvline(x=bcr_limit*100, color='r', linestyle='--', label=f'BCR 제한({bcr_limit*100:.0f}%)')
+        plt.axhline(y=far_limit*100, color='r', linestyle='--', label=f'FAR 제한({far_limit*100:.0f}%)')
+        plt.xlabel('건폐율(BCR) %')
+        plt.ylabel('용적률(FAR) %')
+        plt.title('건폐율과 용적률의 관계')
+        plt.legend()
+        plt.grid(True)
+
+        # 2. 건폐율과 보상의 관계
+        plt.subplot(2, 2, 2)
+        plt.scatter(self.zmq_data_filtered[bcr_col] * 100, self.zmq_data_filtered['reward'], alpha=0.5)
+        plt.axvline(x=bcr_limit*100, color='r', linestyle='--', label=f'BCR 제한({bcr_limit*100:.0f}%)')
+        plt.xlabel('건폐율(BCR) %')
+        plt.ylabel('보상')
+        plt.title('건폐율과 보상의 관계')
+        plt.legend()
+        plt.grid(True)
+
+        # 3. 용적률과 보상의 관계
+        plt.subplot(2, 2, 3)
+        plt.scatter(self.zmq_data_filtered[far_col] * 100, self.zmq_data_filtered['reward'], alpha=0.5)
+        plt.axvline(x=far_limit*100, color='r', linestyle='--', label=f'FAR 제한({far_limit*100:.0f}%)')
+        plt.xlabel('용적률(FAR) %')
+        plt.ylabel('보상')
+        plt.title('용적률과 보상의 관계')
+        plt.legend()
+        plt.grid(True)
+
+        # 4. 일조량과 보상의 관계
+        plt.subplot(2, 2, 4)
+        plt.scatter(self.zmq_data_filtered[sunlight_col], self.zmq_data_filtered['reward'], alpha=0.5)
+        plt.xlabel('일조량')
+        plt.ylabel('보상')
+        plt.title('일조량과 보상의 관계')
+        plt.grid(True)
+
+        plt.tight_layout()
+
+        # 저장 경로
+        save_path = os.path.join(self.session_dir, "architecture_metrics_analysis.png") if self.session_dir else None
+
+        # 그래프 저장
+        if save_path:
+            plt.savefig(save_path)
+            print(f"건축 지표 분석 그래프 저장됨: {save_path}")
+
+        return plt.gcf(), metrics
+
     
     def _load_ppo_log(self):
         """PPO 학습 로그 파일 로드 (CSV 형식)"""
@@ -861,26 +990,36 @@ def main():
     
     args = parser.parse_args()
     
+    # 프로젝트 루트 디렉토리 경로 계산 (수정된 부분)
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     # 출력 디렉토리 생성
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    args.output_dir = os.path.join(base_dir, 'data')
+    args.output_dir = os.path.join(project_root, 'data')
     os.makedirs(args.output_dir, exist_ok=True)
     
     # 세션 디렉토리 생성
     session_dir = create_session_directory(args.output_dir, args.session_name)
     print(f"\n🔹 세션 디렉토리 생성됨: {session_dir}")
     
-    # 상태/보상 로그 파일 경로 결정
+    # 상태/보상 로그 파일 경로 결정 (수정된 부분)
     state_reward_log_path = args.state_reward_log
     if not state_reward_log_path:
-        # 최신 로그 파일 찾기
-        state_reward_log_path = find_latest_file(args.log_dir, "state_reward_log_*.json")
+        # 프로젝트 루트 기준 data/zmq_logs 디렉토리에서 먼저 찾기
+        zmq_logs_dir = os.path.join(project_root, "data", "zmq_logs")
+        state_reward_log_path = find_latest_file(zmq_logs_dir, "state_reward_log_*.json")
+        
         if not state_reward_log_path:
-            print(f"경고: {args.log_dir} 폴더에서 state_reward_log 파일을 찾을 수 없습니다.")
-            state_reward_log_path = find_latest_file(".", "state_reward_log_*.json")
-            if not state_reward_log_path:
-                print("오류: 상태/보상 로그 파일을 찾을 수 없습니다. --state-reward-log 인자로 직접 지정해주세요.")
-                return
+            # args.log_dir에서 찾기
+            state_reward_log_path = find_latest_file(args.log_dir, "state_reward_log_*.json")
+            
+        if not state_reward_log_path:
+            print(f"경고: {zmq_logs_dir} 및 {args.log_dir} 폴더에서 state_reward_log 파일을 찾을 수 없습니다.")
+            # 프로젝트 루트에서 찾기
+            state_reward_log_path = find_latest_file(project_root, "state_reward_log_*.json")
+            
+        if not state_reward_log_path:
+            print("오류: 상태/보상 로그 파일을 찾을 수 없습니다. --state-reward-log 인자로 직접 지정해주세요.")
+            return
     
     print(f"🔹 사용할 상태/보상 로그 파일: {state_reward_log_path}")
     
@@ -929,12 +1068,13 @@ def main():
         if not model_dir:
             model_dir = "."
     else:
-        # 최신 모델 파일 찾기
-        model_file, model_dir = find_latest_model(args.model_dir)
+        # 최신 모델 파일 찾기 (프로젝트 루트 기준 수정)
+        python_modules_dir = os.path.join(project_root, "python_modules")
+        model_file, model_dir = find_latest_model(python_modules_dir)
         if model_file:
             print(f"🔹 사용할 모델 파일: {model_file}")
         else:
-            print(f"⚠️ 경고: {args.model_dir} 폴더에서 PPO 모델 파일을 찾을 수 없습니다.")
+            print(f"⚠️ 경고: {python_modules_dir} 폴더에서 PPO 모델 파일을 찾을 수 없습니다.")
     
     # 파일 경로 설정
     processed_data_file = os.path.join(session_dir, "processed_rlhf_data.csv")
@@ -1010,6 +1150,25 @@ def main():
             print(f"❌ 기준 데이터 생성 중 오류: {e}")
             import traceback
             traceback.print_exc()
+                        
+    # 건축 설계 지표 분석 (기준 데이터 생성 후)
+    if not args.analyze_only and reference_data is not None:
+        print("\n6. 건축 설계 지표 분석")
+        try:
+            arch_fig, arch_metrics = analyzer.analyze_architecture_metrics()
+            # 분석 요약에 결과 추가
+            if arch_metrics:
+                with open(summary_file, 'a', encoding='utf-8') as f:
+                    f.write("\n\n=== 건축 설계 지표 분석 ===\n")
+                    f.write(f"건폐율(BCR) 평균: {arch_metrics['bcr_avg']*100:.2f}% (최대: {arch_metrics['bcr_max']*100:.2f}%)\n")
+                    f.write(f"용적률(FAR) 평균: {arch_metrics['far_avg']*100:.2f}% (최대: {arch_metrics['far_max']*100:.2f}%)\n")
+                    f.write(f"일조량 평균: {arch_metrics['sunlight_avg']:.3f} (최대: {arch_metrics['sunlight_max']:.3f})\n")
+                    f.write(f"건폐율 법적 제한(60%) 위반: {arch_metrics['bcr_violations']}회 ({arch_metrics['bcr_violation_rate']:.1f}%)\n")
+                    f.write(f"용적률 법적 제한(400%) 위반: {arch_metrics['far_violations']}회 ({arch_metrics['far_violation_rate']:.1f}%)\n")
+        except Exception as e:
+            print(f"❌ 건축 지표 분석 중 오류: {e}")
+            import traceback
+            traceback.print_exc()
     
     # 분석 요약 생성
     with open(summary_file, 'w') as f:
@@ -1074,6 +1233,8 @@ def main():
     
     print(f"\n🔹 분석 요약이 {summary_file}에 저장되었습니다.")
     print(f"\n✅ 모든 분석 결과가 {session_dir} 디렉토리에 저장되었습니다.")
+
+
 
 if __name__ == "__main__":
     main()
