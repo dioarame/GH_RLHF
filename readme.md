@@ -11,19 +11,20 @@ The framework consists of:
 2. **ZMQ communication layer** (C# + Python) for bidirectional data exchange
 3. **Human feedback interface** (Flask web application) for collecting design evaluations
 4. **Analysis tools** (Python) for processing and integrating feedback data
+5. **Reward model** training system that incorporates human preferences
 
 ## System Architecture
 
 ```
-┌───────────────┐           ┌───────────────┐          ┌───────────────┐
-│  Grasshopper  │◄──ZMQ────►│  Python RL    │◄────────►│  Human        │
-│  Environment  │           │  Environment   │          │  Feedback UI  │
-└───────────────┘           └───────────────┘          └───────────────┘
-    ▲                            ▲                          ▲
-    │                            │                          │
-    │                            │                          │
-    └────────────────────────────┴──────────────────────────┘
-                         Data Storage & Analysis
+┌─────────────────┐           ┌─────────────────┐          ┌─────────────────┐
+│  Grasshopper    │◄──ZMQ────►│  Python RL      │◄────────►│  Human          │
+│  Environment    │           │  Environment    │          │  Feedback UI    │
+└─────────────────┘           └─────────────────┘          └─────────────────┘
+         ▲                            ▲                           ▲
+         │                            │                           │
+         │                            │                           │
+         └────────────────────────────┴───────────────────────────┘
+                          Data Storage & Analysis
 ```
 
 ## Prerequisites
@@ -36,7 +37,11 @@ The framework consists of:
 
 ### Installation of Python Dependencies
 ```bash
+# Core dependencies
 pip install flask zmq gymnasium stable-baselines3 torch werkzeug numpy pandas matplotlib seaborn
+
+# Additional dependencies for analysis
+pip install scikit-learn
 ```
 
 ### Installation of C# Components
@@ -53,27 +58,42 @@ pip install flask zmq gymnasium stable-baselines3 torch werkzeug numpy pandas ma
 │   ├── designs/     # Stored design parameters and metadata
 │   ├── feedback/    # Human feedback data
 │   ├── meshes/      # 3D mesh exports from Grasshopper
+│   ├── models/      # Trained reinforcement learning models
+│   ├── processed_feedback/  # Processed feedback for reward models
 │   └── zmq_logs/    # Communication logs for debugging
 │
 ├── python_modules/
-│   ├── ppo_train.py             # PPO training script
-│   ├── env_simple.py            # Reinforcement learning environment
-│   ├── zmq_state_receiver.py    # Receiver for state and reward data
-│   ├── analyze_integrated_data.py # Analysis tools for RLHF data
-│   └── design_regenerator.py    # Utility to regenerate optimal designs
+│   ├── analyze_integrated_data.py  # Analysis tools for RLHF data
+│   ├── design_regenerator.py       # Utility to regenerate optimal designs
+│   ├── enhanced_env.py             # Enhanced RL environment with human feedback
+│   ├── feedback_processor.py       # Process human feedback for reward models
+│   ├── reward_adapter.py           # Adapter for different reward functions
+│   ├── reward_fn_optimized.py      # Optimized architecture reward function
+│   ├── reward_fn_original.py       # Original enhanced reward function
+│   ├── reward_function.py          # Basic seasonal reward function
+│   └── rl_architecture_optimizer.py # Main RL architecture optimization system
 │
 ├── server/
 │   ├── app.py                   # Flask server for feedback collection
-│   ├── static/                  # Web UI static assets
+│   ├── static/                  # Web UI static assets (JS, CSS)
+│   │   ├── js/
+│   │   │   ├── main.js              # Main application logic
+│   │   │   ├── three_viewer.js      # Three.js 3D viewer 
+│   │   │   ├── design_manager.js    # Design list management
+│   │   │   ├── utils.js             # Utility functions
+│   │   │   └── feedback_form.js     # Feedback form handling
+│   │   └── css/
+│   │       └── styles.css           # Custom stylesheets
 │   └── templates/               # HTML templates for feedback UI
+│       └── index.html           # Main page template
 │
 └── src/                         # C# source code
     ├── GrasshopperZmqComponent.sln # Visual Studio solution
     └── GrasshopperZmqComponent/
-        ├── SliderInfoExporter.cs # Export slider ranges
-        ├── ZmqListener.cs        # Receive actions from Python
-        ├── ZmqStateSender.cs     # Send state/reward to Python
-        └── MeshExporter.cs       # Export 3D mesh data
+        ├── SliderInfoExporter.cs   # Export slider ranges
+        ├── ZmqListener.cs          # Receive actions from Python
+        ├── ZmqStateSender.cs       # Send state/reward to Python
+        └── MeshExporter.cs         # Export 3D mesh data
 ```
 
 ## Components and Their Functions
@@ -98,35 +118,43 @@ pip install flask zmq gymnasium stable-baselines3 torch werkzeug numpy pandas ma
 
 ### Python Modules
 
-1. **env_simple.py**
-   - Implements a Gymnasium environment for RL
-   - Communicates with Grasshopper via ZMQ
+1. **rl_architecture_optimizer.py**
+   - Main implementation of the architecture optimization system
+   - Integrates RL environment, ZMQ communication, and reward functions
 
-2. **ppo_train.py**
-   - Implementation of Proximal Policy Optimization algorithm
-   - Learns optimal slider values for design objectives
+2. **reward_adapter.py**
+   - Provides a unified interface to different reward functions
+   - Supports switching between original, enhanced, and optimized reward functions
 
-3. **zmq_state_receiver.py**
-   - Receives and logs state/reward data during training
-   - Creates datasets for analysis
+3. **reward_fn_optimized.py**
+   - Optimized reward function based on analysis data
+   - Considers BCR, FAR, seasonal sunlight, and surface-to-volume ratio
 
-4. **analyze_integrated_data.py**
+4. **enhanced_env.py**
+   - Enhanced Gymnasium environment that integrates human feedback
+   - Combines environmental and human-based rewards
+
+5. **feedback_processor.py**
+   - Processes human feedback data into preference pairs
+   - Prepares training data for reward models
+
+6. **analyze_integrated_data.py**
    - Analyzes training results and generates reference data
    - Clusters designs and identifies optimal solutions
 
-5. **design_regenerator.py**
+7. **design_regenerator.py**
    - Recreates optimal designs for feedback collection
    - Sends actions to Grasshopper via ZMQ
 
-### Web Interface
+### Web Interface (Server)
 
 The feedback collection system is powered by a Flask web application that:
-- Displays 3D models of generated designs
-- Provides rating scales for different design aspects
+- Displays 3D models of generated designs using Three.js
+- Provides rating scales for different design aspects (aesthetics, functionality, innovation, feasibility)
 - Collects textual comments and evaluations
-- Manages sessions and design exploration
+- Manages design exploration and feedback sessions
 
-## Workflow
+## RLHF Workflow
 
 ### 1. Prepare the Grasshopper Environment
 
@@ -140,11 +168,18 @@ The feedback collection system is powered by a Flask web application that:
 ### 2. Run Reinforcement Learning Training
 
 ```bash
-# Start the state/reward receiver
-python python_modules/zmq_state_receiver.py
+# Start the training with basic PPO algorithm
+python python_modules/rl_architecture_optimizer.py --steps 10000 --bcr-limit 70.0 --far-min 200.0 --far-max 500.0 --use-seasonal-reward
 
-# In a new terminal, start the PPO training
-python python_modules/ppo_train.py --gh-path "path/to/your/definition.gh" --steps 10000
+# Options:
+# --steps: Number of training steps
+# --bcr-limit: BCR legal limit (percent)
+# --far-min: Minimum FAR legal limit (percent)
+# --far-max: Maximum FAR legal limit (percent)
+# --use-seasonal-reward: Use seasonal sunlight reward function
+# --reward-type: Choose between "original", "enhanced", or "optimized" reward function
+# --port: ZMQ port for action transmission (default: 5556)
+# --state-port: ZMQ port for state reception (default: 5557)
 ```
 
 ### 3. Analyze Results and Generate Reference Designs
@@ -153,7 +188,7 @@ python python_modules/ppo_train.py --gh-path "path/to/your/definition.gh" --step
 # Analyze the collected data
 python python_modules/analyze_integrated_data.py
 
-# Regenerate top designs for feedback
+# Regenerate top designs for feedback collection
 python python_modules/design_regenerator.py --feedback-session 1
 ```
 
@@ -167,7 +202,43 @@ python app.py
 
 Then open http://localhost:5000 in your browser to access the feedback interface.
 
-## ZMQ Port Configuration
+### 5. Process Feedback and Train Reward Model
+
+```bash
+# Process collected feedback into preference pairs
+python python_modules/feedback_processor.py
+
+# Train reward model (implementation not included)
+# This would use the preference pairs to train a neural network
+```
+
+### 6. Use Enhanced Environment with Reward Model
+
+```bash
+# Use the enhanced environment with human feedback reward model
+python python_modules/enhanced_env.py --gh-path "path/to/your/definition.gh" --reward-model "path/to/reward_model.pt"
+```
+
+## Reward Functions
+
+The system includes multiple reward functions with different characteristics:
+
+1. **Original Reward Function** (`reward_function.py`)
+   - Basic seasonal reward function
+   - Considers BCR, FAR, summer and winter sunlight
+
+2. **Enhanced Reward Function** (`reward_fn_original.py`)
+   - Improved stability and training dynamics
+   - Gaussian distribution-based scoring
+   - Reward smoothing for better learning
+
+3. **Optimized Reward Function** (`reward_fn_optimized.py`)
+   - Based on analysis of optimal designs
+   - Target ranges derived from data
+   - Includes surface-to-volume ratio
+   - Fine-tuned for architectural quality
+
+## ZMQ Communication
 
 The system uses several ZMQ ports for communication:
 
@@ -176,6 +247,15 @@ The system uses several ZMQ ports for communication:
 - **5558**: Mesh data requests (Web UI ↔ Grasshopper)
 
 These can be configured via command-line arguments in the Python scripts.
+
+## Architectural Optimization Parameters
+
+The system optimizes several key architectural parameters:
+
+- **BCR (Building Coverage Ratio)**: Percentage of the site covered by building
+- **FAR (Floor Area Ratio)**: Ratio of total floor area to site area
+- **Winter Sunlight**: Sunlight exposure during winter (higher is better)
+- **Surface-to-Volume Ratio**: Ratio of building surface to volume (lower is better for energy efficiency)
 
 ## Troubleshooting
 
@@ -187,21 +267,39 @@ These can be configured via command-line arguments in the Python scripts.
    - Verify the address format is correct (e.g., tcp://localhost:5556)
 
 2. **Grasshopper Responsiveness**
-   - If Grasshopper becomes unresponsive, try reducing the step rate in ppo_train.py
+   - If Grasshopper becomes unresponsive, try reducing the step rate
    - Large models may require more time between actions
 
 3. **Mesh Export Problems**
    - Ensure your geometry is valid and properly connected to the MeshExporter
    - Check the server logs for JSON formatting errors
 
+4. **Invalid Designs**
+   - The system includes automatic retry mechanisms for invalid geometries
+   - Ensure your Grasshopper definition produces closed breps
+
 ## Extending the System
 
 ### Adding Custom Reward Functions
 
-Modify your Grasshopper definition to compute custom rewards based on:
-- Design performance metrics (structural, environmental, etc.)
-- Geometric properties (volume, surface area, etc.)
-- Any other quantifiable design objectives
+Create a new reward function by implementing:
+1. A class with a `calculate_reward(state)` method
+2. State normalization and scoring logic
+3. Register it in the `reward_adapter.py` file
+
+```python
+# Example:
+class CustomRewardFunction:
+    def __init__(self, params):
+        # Initialize parameters
+        
+    def calculate_reward(self, state):
+        # Calculate reward from state
+        return reward, info
+        
+    def reset_prev_state(self):
+        # Reset internal state
+```
 
 ### Creating New Analysis Tools
 
