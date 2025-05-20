@@ -24,7 +24,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 import zmq
 import torch
 from typing import Dict, List, Tuple, Union, Optional, Any
-from reward_function import ArchitectureRewardFunction_Seasonal
+from reward_adapter import create_reward_function
 
 # 초기 설정 및 글로벌 변수
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
@@ -79,13 +79,14 @@ class StateReceiver:
         
         # 보상 함수가 없으면 기본 함수 생성
         if self.reward_function is None:
-            from reward_function import ArchitectureRewardFunction_Seasonal
-            self.reward_function = ArchitectureRewardFunction_Seasonal(
-                bcr_legal_limit_percent=70.0,
-                far_legal_min_limit_percent=200.0,
-                far_legal_max_limit_percent=500.0,
-                summer_sunlight_norm_cap=200000.0,
-                winter_sunlight_norm_cap=200000.0
+            from reward_adapter import create_reward_function
+            self.reward_function = create_reward_function(
+                reward_type="optimized",  # 또는 "original"
+                bcr_limit=70.0,
+                far_min=200.0,
+                far_max=500.0,
+                use_seasonal=True,
+                debug=DEBUG
             )
         
         # 디렉토리 생성
@@ -112,8 +113,11 @@ class StateReceiver:
             
             # CSV 메트릭 파일 초기화
             self.csv_file = open(self.metrics_file_path, 'w', encoding='utf-8')
-            header = "timestamp,step,bcr,far,sunlight,reward,action1,action2,action3,action4\n"
-            self.csv_file.write(header)
+            
+            # 헤더는 process_message에서 첫 메시지 처리 시 작성하도록 변경
+            # header = "timestamp,step,bcr,far,sunlight,reward,action1,action2,action3,action4\n"
+            # self.csv_file.write(header)
+            
             log_info(f"📊 메트릭 CSV 파일 생성됨: {self.metrics_file_path}")
             
             self.running = True
@@ -161,6 +165,119 @@ class StateReceiver:
         # 수신 루프 종료 후 정리
         self.cleanup()
     
+    # StateReceiver 클래스의 process_message 메서드 부분 수정
+
+# StateReceiver 클래스 내에서 process_message 메서드를 올바르게 정의
+# 파일: StateReceiver 클래스 수정
+
+class StateReceiver:
+    def __init__(self, port=5557, save_dir=ZMQ_LOGS_DIR, reward_function=None):
+        self.port = port
+        self.save_dir = save_dir
+        self.context = None
+        self.socket = None
+        self.file = None
+        self.csv_file = None
+        self.csv_writer = None
+        self.running = False
+        self.thread = None
+        self.stop_event = STOP_EVENT
+        self.message_count = 0
+        self.data_message_count = 0
+        self.health_check_count = 0
+        self.start_time = None
+        
+        # 외부에서 전달받은 보상 함수 사용
+        self.reward_function = reward_function
+        
+        # 보상 함수가 없으면 기본 함수 생성
+        if self.reward_function is None:
+            from reward_adapter import create_reward_function
+            self.reward_function = create_reward_function(
+                reward_type="optimized",  # 또는 "original"
+                bcr_limit=70.0,
+                far_min=200.0,
+                far_max=500.0,
+                use_seasonal=True,
+                debug=DEBUG
+            )
+        
+        # 디렉토리 생성
+        os.makedirs(self.save_dir, exist_ok=True)
+        
+        # 타임스탬프 생성
+        self.timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file_path = os.path.join(self.save_dir, f"state_reward_log_{self.timestamp}.json")
+        self.metrics_file_path = os.path.join(self.save_dir, f"architecture_metrics_{self.timestamp}.csv")
+    
+    def initialize(self):
+        try:
+            # ZMQ 초기화
+            self.context = zmq.Context()
+            self.socket = self.context.socket(zmq.PULL)
+            self.socket.set_hwm(1000)
+            bind_address = f"tcp://*:{self.port}"
+            self.socket.bind(bind_address)
+            log_success(f"ZMQ PULL 소켓이 {bind_address}에 바인딩되었습니다.")
+            
+            # 로그 파일 초기화
+            self.file = open(self.log_file_path, 'w', encoding='utf-8')
+            self.file.write('[\n')  # JSON 배열 시작
+            
+            # CSV 메트릭 파일 초기화
+            self.csv_file = open(self.metrics_file_path, 'w', encoding='utf-8')
+            
+            # 헤더는 process_message에서 첫 메시지 처리 시 작성하도록 변경
+            
+            log_info(f"📊 메트릭 CSV 파일 생성됨: {self.metrics_file_path}")
+            
+            self.running = True
+            self.start_time = time.time()
+            return True
+        except Exception as e:
+            log_error(f"상태 수신기 초기화 오류: {e}")
+            self.cleanup()
+            return False
+    
+    def start(self):
+        log_info(f"🔄 상태 수신기가 포트 {self.port}에서 실행 중입니다.")
+        log_info(f"📝 데이터는 {self.log_file_path}에 저장됩니다.")
+        log_info("\n👂 상태 수신 대기 중...")
+        
+        # 메인 스레드에서 직접 실행
+        self.receive_loop()
+    
+    def receive_loop(self):
+        if not self.running:
+            return
+        
+        while not self.stop_event.is_set():
+            try:
+                # 비차단 모드로 메시지 수신 (짧은 대기 시간)
+                try:
+                    message = self.socket.recv_string(flags=zmq.NOBLOCK)
+                    self.process_message(message)
+                except zmq.Again:
+                    # 메시지가 없으면 대기
+                    time.sleep(0.1)
+                    
+                    # 일정 시간 동안 데이터가 없으면 자동 종료
+                    elapsed = time.time() - self.start_time
+                    if self.data_message_count == 0 and elapsed > 60:
+                        log_warning(f"\n⏱️ 60초 동안 상태/보상 데이터가 없어 자동 종료합니다\n")
+                        self.stop_event.set()
+                        break
+                    
+            except Exception as e:
+                log_error(f"메시지 수신 중 오류: {e}")
+                # 잠시 대기 후 계속
+                time.sleep(0.5)
+        
+        # 수신 루프 종료 후 정리
+        self.cleanup()
+    
+    # 여기서 process_message 메서드가 적절하게 들여쓰기 되어야 함
+    # StateReceiver 클래스의 process_message 메서드 수정
     def process_message(self, message):
         try:
             data = json.loads(message)
@@ -190,76 +307,109 @@ class StateReceiver:
                 # CSV 파일에 메트릭 기록
                 if self.csv_file:
                     timestamp = data.get('timestamp', int(time.time() * 1000))
-                    state = data.get('state', [0, 0, 0])
+                    
+                    # 상태 처리 개선 - Closed Brep 확인
+                    state = data.get('state', [0, 0, 0, 0])
                     actions = data.get('action', [0, 0, 0, 0])
                     
-                    # 필요한 경우 배열 길이 보정
-                    if len(state) < 3:
-                        state = state + [0] * (3 - len(state))
-                    if len(actions) < 4:
-                        actions = actions + [0] * (4 - len(actions))
+                    # 새로운 방식 - Closed Brep 확인
+                    is_closed_brep = False
+                    bcr = 0
+                    far = 0
+                    winter_sunlight = 0
+                    sv_ratio = 0
                     
-                    bcr = state[0] if len(state) > 0 else 0
-                    far = state[1] if len(state) > 1 else 0
-                    sunlight = state[2] if len(state) > 2 else 0
+                    # 상태 형식 분석 및 처리 (개선된 버전)
+                    if isinstance(state, list):
+                        # 숫자 값과 문자열 분리
+                        numeric_values = [item for item in state if isinstance(item, (int, float))]
+                        string_values = [item for item in state if isinstance(item, str)]
+                        
+                        if DEBUG:
+                            log_debug(f"상태 숫자값: {numeric_values}")
+                            if string_values:
+                                log_debug(f"상태 문자열: {string_values}")
+                        
+                        # Closed Brep 문자열 확인
+                        is_closed_brep = any("Closed Brep" in s for s in string_values) and not any(s == "0" for s in string_values)
+                        
+                        # 숫자 값 처리 (Grasshopper 형식에 맞게)
+                        if len(numeric_values) >= 4:
+                            bcr = numeric_values[0]
+                            far = numeric_values[1]
+                            winter_sunlight = numeric_values[2]
+                            sv_ratio = numeric_values[3]
+                            is_closed_brep = True  # 충분한 숫자 값이 있으면 정상으로 간주
+                        elif len(numeric_values) == 3:
+                            bcr = numeric_values[0]
+                            far = numeric_values[1]
+                            winter_sunlight = numeric_values[2]
+                            sv_ratio = 1.0  # 기본값
+                        
+                        # 첫 번째 요소가 "0"인 경우 특별 처리
+                        if len(state) > 0 and isinstance(state[0], str) and state[0] == "0":
+                            is_closed_brep = False
+                            bcr = far = winter_sunlight = sv_ratio = 0
                     
                     # 정확한 보상 계산 - 환경과 공유된 보상 함수 사용
                     try:
-                        # 상태가 4차원이 아닌 경우 4차원으로 확장
-                        if len(state) == 4:
-                            state_4d = state
-                        elif len(state) == 3:
-                            # 일사량을 여름/겨울 동일하게 설정
-                            state_4d = [state[0], state[1], state[2], state[2]]
-                        elif len(state) >= 5:
-                            # 특수한 5차원 상태 처리
-                            state_4d = [state[0], state[2], state[3], state[4]]
+                        # 상태가 정상인 경우(Closed Brep)에만 실제 보상 계산
+                        if is_closed_brep:
+                            # 4차원 상태 벡터 구성 - 올바른 순서로
+                            state_4d = [bcr, far, winter_sunlight, sv_ratio]
+                            # 보상 함수 호출
+                            reward_value, reward_info = self.reward_function.calculate_reward(state_4d)
                         else:
-                            # 잘못된 형식
-                            log_error(f"잘못된 상태 형식: {state}")
-                            state_4d = [0, 0, 0, 0]
-                        
-                        # 보상 함수 호출
-                        reward_value, reward_info = self.reward_function.calculate_reward(state_4d)
-                        
-                        # 원본 데이터에 계산된 보상 업데이트 (선택사항)
+                            # 비정상 상태(Closed Brep이 아님)는 큰 패널티
+                            reward_value = -30.0
+                            reward_info = {"error": "Invalid geometry (Not a Closed Brep)"}
+                            
+                        # 여기서 계산된 보상을, 이후 상태 업데이트에 사용할 수 있도록 데이터에 추가
                         data['calculated_reward'] = reward_value
                         data['reward_info'] = reward_info
+                        data['is_closed_brep'] = is_closed_brep
                         
                     except Exception as e:
                         log_error(f"보상 계산 중 오류: {e}")
                         # 오류 발생 시 간단한 대체 계산 사용
-                        normalized_sunlight = min(1.0, sunlight / 500000.0) * 10.0
-                        legal_penalty = 0.0
-                        if far > 5.0:
-                            legal_penalty = 5.0
-                        if bcr > 0.7:
-                            legal_penalty += 5.0
-                        reward_value = normalized_sunlight - legal_penalty
+                        reward_value = -10.0 if not is_closed_brep else 0
+                        data['calculated_reward'] = reward_value
+                        data['reward_info'] = {"error": str(e)}
+                        data['is_closed_brep'] = is_closed_brep
                     
-                    # CSV 라인 작성
-                    csv_line = f"{timestamp},{self.data_message_count},{bcr},{far},{sunlight},{reward_value}"
+                    # CSV 헤더가 없을 경우 추가
+                    if self.data_message_count == 1:
+                        header = "timestamp,step,is_closed_brep,excluded_from_training,bcr,far,winter_sunlight,sv_ratio,reward"
+                        
+                        # 액션 헤더 추가
+                        for i in range(len(actions[:4])):
+                            header += f",action{i+1}"
+                        
+                        self.csv_file.write(header + "\n")
+
+                    # CSV 라인 작성 (수정: 표면적 체적비 추가)
+                    excluded = 1 if not is_closed_brep else 0  # 유효하지 않은 상태는 학습에서 제외
+                    csv_line = f"{timestamp},{self.data_message_count},{int(is_closed_brep)},{excluded},{bcr},{far},{winter_sunlight},{sv_ratio},{reward_value}"
                     
+                    # 액션 값 추가
                     for action in actions[:4]:
                         csv_line += f",{action}"
+                    
                     self.csv_file.write(csv_line + "\n")
                     self.csv_file.flush()
-                
-                # 상태와 보상을 큐에 추가
-                state = data.get('state', [0, 0, 0])
-                
-                # 여기서 계산된 보상을 사용
-                calculated_reward = data.get('calculated_reward', 0) 
-                
-                if DEBUG:
-                    log_debug(f"큐에 상태 추가: state={state}, reward={calculated_reward}")
-                        
-                STATE_QUEUE.put((state, calculated_reward, data))
-                global LAST_STATE
-                LAST_STATE = (state, calculated_reward, data)
+                    
+                    # 상태와 보상을 큐에 추가 - 올바른 상태 벡터
+                    formatted_state = [bcr, far, winter_sunlight, sv_ratio]
+                    
+                    if DEBUG:
+                        log_debug(f"큐에 상태 추가: state={formatted_state}, reward={reward_value}, is_closed_brep={is_closed_brep}")
+                    
+                    STATE_QUEUE.put((formatted_state, reward_value, data))
+                    global LAST_STATE
+                    LAST_STATE = (formatted_state, reward_value, data)
             else:
                 log_warning(f"'state' 키가 없는 메시지: {message[:50]}...")
-                    
+                        
         except json.JSONDecodeError:
             log_error(f"잘못된 JSON 형식: {message[:100]}...")
         except Exception as e:
@@ -315,10 +465,12 @@ class StateReceiver:
 class ArchitectureOptimizationEnv(gym.Env):
     """건축 설계 최적화를 위한 강화학습 환경"""
     
+    # __init__ 메서드 중복을 제거하고 하나만 유지
     def __init__(self, action_port=5556, state_port=5557, 
         bcr_limit=70.0, far_min_limit=200.0, far_max_limit=500.0,
         slider_mins=None, slider_maxs=None, 
         use_seasonal_reward=False,
+        reward_type="optimized",
         wait_time=5.0, initial_wait=6.0):
         super(ArchitectureOptimizationEnv, self).__init__()
         
@@ -345,25 +497,31 @@ class ArchitectureOptimizationEnv(gym.Env):
         # 계절별 보상 함수 사용 여부 저장
         self.use_seasonal_reward = use_seasonal_reward
         
-        # 계절별 보상 함수 사용 여부 저장
-        self.use_seasonal_reward = use_seasonal_reward
+        # reward_type 저장
+        self.reward_type = reward_type
         
         # 보상 함수 초기화 - 항상 동일한 방식으로 초기화하고, 
         # use_seasonal_reward에 따라 가중치만 조정
-        self.reward_function = ArchitectureRewardFunction_Seasonal(
-            bcr_legal_limit_percent=bcr_limit,
-            far_legal_min_limit_percent=far_min_limit,
-            far_legal_max_limit_percent=far_max_limit,
-            summer_sunlight_norm_cap=200000.0,
-            winter_sunlight_norm_cap=200000.0,
-            bcr_target_weight=20.0,
-            far_target_weight=20.0,
-            # 계절별 사용 여부에 따라 가중치 조정
-            summer_sunlight_weight=20.0 if use_seasonal_reward else 10.0,
-            winter_sunlight_weight=20.0 if use_seasonal_reward else 10.0,
-            improvement_total_weight=20.0,
-            legality_violation_penalty_factor=50.0
-        )
+        try:
+            from reward_adapter import create_reward_function
+            self.reward_function = create_reward_function(
+                reward_type=self.reward_type,  # 전달받은 reward_type 사용
+                bcr_limit=bcr_limit,
+                far_min=far_min_limit,
+                far_max=far_max_limit,
+                use_seasonal=use_seasonal_reward,
+                debug=DEBUG
+            )
+            print(f"{self.reward_type} 보상 함수를 사용합니다.")
+        except ImportError as e:
+            print(f"reward_adapter를 임포트할 수 없습니다: {e}")
+            # 기본 보상 함수 생성 (모듈 없이 인라인으로 정의)
+            self.reward_function = self._create_default_reward_function(
+                bcr_limit=bcr_limit,
+                far_min=far_min_limit, 
+                far_max=far_max_limit,
+                use_seasonal=use_seasonal_reward
+            )
         
         # 액션 공간: 4개의 정규화된 슬라이더 값 (-1.0 ~ 1.0)
         self.action_space = spaces.Box(
@@ -375,14 +533,14 @@ class ArchitectureOptimizationEnv(gym.Env):
         
         # 상태 공간: 계절별/일반 보상에 따라 다르게 정의
         if self.use_seasonal_reward:
-            # [BCR, FAR, SummerTime, WinterTime]
+            # [BCR, FAR, WinterTime, SV_Ratio]
             self.observation_space = spaces.Box(
                 low=np.array([0.0, 0.0, 0.0, 0.0]),
-                high=np.array([1.0, 10.0, 200000.0, 200000.0]),  # 정규화된 값 범위
+                high=np.array([1.0, 10.0, 200000.0, 6.0]),  # SV_Ratio 최대 6.0
                 dtype=np.float32
             )
         else:
-            # [BCR, FAR, 일조량]
+            # [BCR, FAR, 일사량]
             self.observation_space = spaces.Box(
                 low=np.array([0.0, 0.0, 0.0]),
                 high=np.array([1.0, 10.0, 1.0]),  # 정규화된 값 범위
@@ -402,7 +560,7 @@ class ArchitectureOptimizationEnv(gym.Env):
         log_info(f"🏗️ 건축 최적화 환경이 초기화되었습니다.")
         log_info(f"   - BCR 제한: {self.bcr_limit}%")
         log_info(f"   - FAR 허용 범위: {self.far_min_limit}% ~ {self.far_max_limit}%")
-        log_info(f"   - 보상 함수 유형: {'계절별' if self.use_seasonal_reward else '일반'}")
+        log_info(f"   - 보상 함수 유형: {'계절별' if self.use_seasonal_reward else '일반'} ({self.reward_type})")
         log_info(f"   - 액션 공간: {self.action_space}")
         log_info(f"   - 상태 공간: {self.observation_space}")
     
@@ -522,14 +680,14 @@ class ArchitectureOptimizationEnv(gym.Env):
                 
                 # 상태 형식 확인 및 처리
                 if self.use_seasonal_reward:
-                    # 계절별 보상을 사용하는 경우, 4개 요소 필요 [BCR, FAR, Summer, Winter]
+                    # 계절별 보상을 사용하는 경우, 4개 요소 필요 [BCR, FAR, Winter, SV_Ratio]
                     if len(state) == 4:
                         self.current_state = np.array(state, dtype=np.float32)
                     elif len(state) == 3:
-                        # 일사량이 하나만 받아진 경우, 여름/겨울 동일 값 사용 (임시 방안)
-                        bcr, far, sunlight = state
-                        self.current_state = np.array([bcr, far, sunlight, sunlight], dtype=np.float32)
-                        log_warning("⚠️ 계절별 일사량이 분리되지 않았습니다. 동일한 값으로 여름/겨울 일사량 설정.")
+                        # SV_Ratio가 없는 경우, 기본값 1.0 사용
+                        bcr, far, winter = state
+                        self.current_state = np.array([bcr, far, winter, 1.0], dtype=np.float32)
+                        log_warning("⚠️ 표면적 체적비가 없습니다. 기본값 1.0 사용.")
                     else:
                         log_error(f"❌ 상태 형식 오류: {state}")
                         continue
@@ -598,8 +756,8 @@ class ArchitectureOptimizationEnv(gym.Env):
             log_debug(f"계산된 보상: {reward}")
             log_debug(f"BCR 점수: {info['bcr_score']:.4f}, 가중치 적용: {info['weighted_bcr_reward']:.2f}")
             log_debug(f"FAR 점수: {info['far_score']:.4f}, 가중치 적용: {info['weighted_far_reward']:.2f}")
-            log_debug(f"여름 점수: {info['summer_score']:.4f}, 가중치 적용: {info['weighted_summer_reward']:.2f}")
             log_debug(f"겨울 점수: {info['winter_score']:.4f}, 가중치 적용: {info['weighted_winter_reward']:.2f}")
+            log_debug(f"표면적 체적비 점수: {info['sv_ratio_score']:.4f}, 가중치 적용: {info['weighted_sv_ratio_reward']:.2f}")
             log_debug(f"기본 보상(패널티 전): {info['base_reward_before_penalty']:.2f}")
             
             if 'legality_penalty' in info and info['legality_penalty'] > 0:
@@ -613,6 +771,23 @@ class ArchitectureOptimizationEnv(gym.Env):
         
         return reward, info
     
+    def _clear_state_queue(self):
+        """STATE_QUEUE의 모든 항목을 비워 이전 상태를 제거합니다"""
+        log_debug("이전 상태 큐 비우는 중...")
+        count = 0
+        
+        # 큐의 모든 항목 제거
+        global STATE_QUEUE
+        while True:
+            try:
+                STATE_QUEUE.get(block=False)
+                count += 1
+            except queue.Empty:
+                break
+        
+        if count > 0:
+            log_debug(f"{count}개의 이전 상태 항목을 제거했습니다.")
+    
     def reset(self, seed=None, options=None):
         """환경을 초기화하고 초기 상태를 반환합니다"""
         super().reset(seed=seed)
@@ -625,7 +800,7 @@ class ArchitectureOptimizationEnv(gym.Env):
         # 초기 액션 생성 (모든 슬라이더를 중간값으로 설정)
         initial_action = np.zeros(4, dtype=np.float32)
         
-        # 액션을 실제 슬라이더 값으로 변환
+        # 액션을 실제 슬라이더 값로 변환
         real_action = self._normalize_actions(initial_action)
         log_info(f"🔄 환경 초기화: 정규화된 초기 액션={initial_action}, 실제 값={real_action}")
         
@@ -648,9 +823,9 @@ class ArchitectureOptimizationEnv(gym.Env):
         log_info(f"초기 상태: {initial_state}")
         
         return initial_state, initial_info
-    
+
     def step(self, action):
-        # 액션 로깅 (디버깅용)
+    # 액션 로깅 및 처리 (기존 코드 유지)
         log_debug(f"원본 액션: {action}")
         
         # 액션 범위 체크
@@ -663,31 +838,112 @@ class ArchitectureOptimizationEnv(gym.Env):
         
         # 실제 슬라이더 값으로 변환
         real_action = self._normalize_actions(action)
-        log_info(f"📊 실제 슬라이더 값: {real_action}")  # 변환된 값
+        log_info(f"📊 실제 슬라이더 값: {real_action}")
+        
+        # 현재 큐의 모든 항목 비우기 - 이전 상태 제거
+        self._clear_state_queue()
         
         # ZMQ를 통해 Grasshopper로 액션 전송
         self._send_action(real_action)
-        log_info(f"📊 실제 슬라이더 값: {real_action}")
         
-        # Grasshopper가 처리할 시간을 줌
+        # Grasshopper가 처리할 시간을 충분히 줌
         log_info(f"⏱️ Grasshopper 처리를 위해 {self.wait_time}초 대기 중...")
         time.sleep(self.wait_time)
         
-        # ZMQ를 통해 Grasshopper에서 상태 수신
-        if self._wait_for_state():
-            state = self.current_state
-            reward = self.current_reward  # 이미 StateReceiver에서 계산된 보상
-            info = self.current_info
-        else:
-            log_warning("Grasshopper에서 상태를 받지 못했습니다. 이전 상태 사용.")
-            state, reward, info = self._get_last_state()
+        # 최대 재시도 횟수 설정
+        max_retries = 5  # 더 많은 재시도 기회
+        retries = 0
+        valid_state_received = False
+        
+        while retries < max_retries and not valid_state_received:
+            # ZMQ를 통해 Grasshopper에서 상태 수신
+            if self._wait_for_state():
+                state = self.current_state
+                reward = self.current_reward
+                info = self.current_info
+                
+                # 상태가 유효한지 확인 (Closed Brep 여부)
+                is_valid_state = True
+                if 'reward_info' in info:
+                    reward_info = info['reward_info']
+                    if isinstance(reward_info, dict) and 'error' in reward_info and 'Not a Closed Brep' in reward_info['error']:
+                        is_valid_state = False
+                        log_warning(f"⚠️ 유효하지 않은 형태 (시도 {retries+1}/{max_retries}): Closed Brep이 아님")
+                
+                if is_valid_state:
+                    valid_state_received = True
+                else:
+                    # 유효하지 않은 상태면 약간 다른 액션으로 재시도
+                    retries += 1
+                    if retries < max_retries:
+                        # 재시도 전략 다양화
+                        if retries == 1:
+                            # 약간의 노이즈 추가
+                            noise = np.random.normal(0, 0.1, size=action.shape)
+                            new_action = np.clip(action + noise, -1.0, 1.0)
+                        elif retries == 2:
+                            # 살짝 축소
+                            new_action = np.clip(action * 0.95, -1.0, 1.0)
+                        elif retries == 3:
+                            # 살짝 확대
+                            new_action = np.clip(action * 1.05, -1.0, 1.0)
+                        else:
+                            # 더 큰 노이즈
+                            noise = np.random.normal(0, 0.3, size=action.shape)
+                            new_action = np.clip(action + noise, -1.0, 1.0)
                         
-        # 여기서 상태와 보상 로깅
+                        log_info(f"🔄 유효하지 않은 상태로 인한 재시도 {retries}/{max_retries}, 수정된 액션: {new_action}")
+                        
+                        # 수정된 액션으로 다시 시도
+                        real_action = self._normalize_actions(new_action)
+                        self._send_action(real_action)
+                        time.sleep(self.wait_time)  # 처리 시간 대기
+            else:
+                log_warning("Grasshopper에서 상태를 받지 못했습니다. 이전 상태 사용.")
+                state, reward, info = self._get_last_state()
+                valid_state_received = True  # 이전 상태를 사용하므로 루프 종료
+        
+        # 모든 재시도 후에도 유효한 상태를 받지 못한 경우
+        if not valid_state_received:
+            log_warning(f"⚠️ {max_retries}번의 시도 후에도 유효한 상태를 받지 못했습니다.")
+            
+            # 학습에서 제외하기 위해 'truncated'를 True로 설정하고, reward는 0으로 설정
+            # 'truncated'가 True이면 SB3의 PPO 알고리즘이 이 샘플을 학습에서 제외
+            truncated = True
+            reward = 0.0
+            
+            # 이전 상태 사용 (하지만 학습에서는 제외됨)
+            state, _, info = self._get_last_state()
+            info['excluded_from_training'] = True
+            info['reason'] = "Invalid geometry (Not a Closed Brep) after max retries"
+            
+            # 에피소드 종료는 아님
+            terminated = False
+            
+            # 이 상태에서는 에피소드 스텝과 총 스텝을 업데이트하지 않음
+            return state, reward, terminated, truncated, info
+        
+        # 상태와 보상 로깅 - 표면적 체적비 포함
         bcr = state[0] * 100.0 if len(state) > 0 else 0.0
         far = state[1] * 100.0 if len(state) > 1 else 0.0
-        sunlight = state[2] if len(state) > 2 else 0.0
-        log_info(f"📊 BCR: {bcr:.1f}%, FAR: {far:.1f}%, 일조량: {sunlight:.2f}")
-        log_info(f"💰 보상: {reward}")
+
+        # 현재 상태의 값들 추출
+        if len(state) >= 4:
+            winter_sunlight = state[2] if len(state) > 2 else 0.0
+            sv_ratio = state[3] if len(state) > 3 else 0.0
+            log_info(f"📊 BCR: {bcr:.1f}%, FAR: {far:.1f}%, 겨울 일사량: {winter_sunlight:.2f}, 표면적 체적비: {sv_ratio:.4f}")
+        else:
+            log_info(f"📊 BCR: {bcr:.1f}%, FAR: {far:.1f}%, 값 부족")
+        
+        # Closed Brep 상태 확인 및 표시
+        is_closed_brep = True  # 기본값
+        if 'reward_info' in info:
+            reward_info = info['reward_info']
+            if isinstance(reward_info, dict) and 'error' in reward_info and 'Not a Closed Brep' in reward_info['error']:
+                is_closed_brep = False
+                log_warning(f"⚠️ 유효하지 않은 형태: Closed Brep이 아님")
+        
+        log_info(f"💰 보상: {reward} (Closed Brep: {'Yes' if is_closed_brep else 'No'})")
         
         # 에피소드가 종료되는지 확인
         terminated = False
@@ -697,6 +953,11 @@ class ArchitectureOptimizationEnv(gym.Env):
         info['episode_steps'] = self.episode_steps
         info['total_steps'] = self.total_steps
         info['actual_action'] = real_action.tolist()
+        info['is_closed_brep'] = is_closed_brep
+        
+        # 에피소드 스텝과 총 스텝 업데이트
+        self.episode_steps += 1
+        self.total_steps += 1
         
         return state, reward, terminated, truncated, info
     
@@ -749,24 +1010,21 @@ def train_ppo(env, total_timesteps=10000, learning_rate=0.0003, save_dir=None, l
     )
     
     # 모델 설정
+    # PPO 모델 설정
     model = PPO(
         "MlpPolicy",
         env,
-        learning_rate=learning_rate,
-        n_steps=10,         # 2048에서 10으로 변경
-        batch_size=5,       # 64에서 5로 변경
-        n_epochs=1,         # 10에서 1로 변경
+        learning_rate=3e-4,
+        n_steps=512,          # 512 스텝마다 정책 업데이트 (2048에서 축소)
+        batch_size=64,        # 적절한 배치 크기 유지
+        n_epochs=5,           # 10에서 5로 축소 (더 빠른 학습)
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
-        clip_range_vf=None,
         normalize_advantage=True,
         ent_coef=0.01,
         vf_coef=0.5,
         max_grad_norm=0.5,
-        use_sde=False,
-        sde_sample_freq=-1,
-        target_kl=None,
         tensorboard_log=log_dir,
         policy_kwargs=dict(
             net_arch=[dict(pi=[64, 64], vf=[64, 64])],
@@ -877,7 +1135,19 @@ def main():
     parser.add_argument("--far-max", type=float, default=500.0, help="최대 FAR (백분율)")
     parser.add_argument("--use-seasonal-reward", action="store_true", 
                         help="계절별 일사량을 고려한 보상 함수 사용")
+    parser.add_argument("--reward-type", type=str, default="optimized", choices=["original", "enhanced", "optimized"],
+                    help="보상 함수 유형 (original, enhanced, optimized) (기본값: optimized)")
     args = parser.parse_args()
+    
+    # 강제 종료 핸들러 추가
+    def force_stop_handler(sig, frame):
+        print("\n강제 종료 신호를 받았습니다.")
+        import os
+        os._exit(1)
+    
+    # 원래 핸들러와 함께 등록
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, force_stop_handler)
     
     # 디버그 모드 설정
     global DEBUG
@@ -893,32 +1163,43 @@ def main():
     print(f"🕒 세션 ID: {timestamp}")
     print(f"📁 로그 디렉토리: {ZMQ_LOGS_DIR}")
     print(f"💻 학습 디바이스: {'cuda' if torch.cuda.is_available() else 'cpu'}")
-    print(f"📏 건축 제한: BCR {args.bcr_limit}%, FAR {args.far_min}%~{args.far_max}%\n")
+    print(f"📏 건축 제한: BCR {args.bcr_limit}%, FAR {args.far_min}%~{args.far_max}%")
+    print(f"🔧 보상 함수 유형: {args.reward_type}")
+    print(f"🌞 계절별 보상: {'사용' if args.use_seasonal_reward else '미사용'}\n")
     
     # 시그널 핸들러 등록
     signal.signal(signal.SIGINT, signal_handler)
     
     # 단계별 실행
     print("[1/5] 환경 초기화 중...")
-    env = ArchitectureOptimizationEnv(
-        action_port=args.port,
-        state_port=args.state_port,
-        bcr_limit=args.bcr_limit,
-        far_min_limit=args.far_min,
-        far_max_limit=args.far_max,
-        use_seasonal_reward=args.use_seasonal_reward  
-    )
+    try:
+        env = ArchitectureOptimizationEnv(
+            action_port=args.port,
+            state_port=args.state_port,
+            bcr_limit=args.bcr_limit,
+            far_min_limit=args.far_min,
+            far_max_limit=args.far_max,
+            use_seasonal_reward=args.use_seasonal_reward,
+            reward_type=args.reward_type  # 명시적으로 reward_type 전달
+        )
+    except Exception as e:
+        log_error(f"환경 초기화 중 오류: {e}")
+        return
     
     # 이제 상태 수신기 초기화 (환경의 보상 함수 전달)
     print("[2/5] 상태 수신기 초기화 중...")
-    state_receiver = StateReceiver(
-        port=args.state_port, 
-        save_dir=ZMQ_LOGS_DIR,
-        reward_function=env.reward_function  # 환경의 보상 함수 전달
-    )
-    
-    if not state_receiver.initialize():
-        log_error("상태 수신기 초기화 실패, 프로그램을 종료합니다.")
+    try:
+        state_receiver = StateReceiver(
+            port=args.state_port, 
+            save_dir=ZMQ_LOGS_DIR,
+            reward_function=env.reward_function  # 환경의 보상 함수 전달
+        )
+        
+        if not state_receiver.initialize():
+            log_error("상태 수신기 초기화 실패, 프로그램을 종료합니다.")
+            return
+    except Exception as e:
+        log_error(f"상태 수신기 초기화 중 오류: {e}")
         return
     
     # 상태 수신기 스레드 시작
