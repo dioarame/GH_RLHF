@@ -117,10 +117,22 @@ class ThreeViewer {
      * 컨트롤 설정
      */
     setupControls() {
-        this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
-        this.controls.enableDamping = true;
-        this.controls.dampingFactor = 0.05;
-        this.controls.target.set(0, 0, 0);
+        // OrbitControls가 없는 경우 대체 구현
+        if (typeof THREE.OrbitControls === 'undefined') {
+            console.log('OrbitControls not available, using simple controls');
+            // 간단한 컨트롤 구현
+            this.controls = {
+                update: function() {},
+                target: new THREE.Vector3(0, 0, 0),
+                dispose: function() {},
+                reset: function() {}
+            };
+        } else {
+            this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.target.set(0, 0, 0);
+        }
     }
 
     /**

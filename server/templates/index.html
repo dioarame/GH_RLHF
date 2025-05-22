@@ -3,10 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Grasshopper RLHF - 인간 피드백 수집 시스템</title>
-    
-    <!-- Favicon -->
-    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
+    <title>Grasshopper RLHF - 인간 피드백 기반 건축 설계 시스템</title>
     
     <!-- Bootstrap CSS -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
@@ -15,8 +12,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     
     <!-- Three.js -->
-    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
     
     <!-- 커스텀 CSS -->
     <link href="/static/css/styles.css" rel="stylesheet">
@@ -29,34 +26,16 @@
                 <div class="container-fluid">
                     <a class="navbar-brand" href="/">
                         <i class="fa-solid fa-cube me-2"></i>
-                        Grasshopper RLHF
+                        Grasshopper RLHF - 인간 피드백 기반 건축 설계
                     </a>
-                    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                        <span class="navbar-toggler-icon"></span>
-                    </button>
-                    <div class="collapse navbar-collapse" id="navbarNav">
-                        <ul class="navbar-nav me-auto">
-                            <li class="nav-item">
-                                <a class="nav-link active" href="#" id="nav-designs">
-                                    <i class="fa-solid fa-shapes me-1"></i> 디자인
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="#" id="nav-feedback">
-                                    <i class="fa-solid fa-comment me-1"></i> 피드백
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="#" id="nav-analysis">
-                                    <i class="fa-solid fa-chart-line me-1"></i> 분석
-                                </a>
-                            </li>
-                        </ul>
-                        <div class="d-flex">
-                            <button class="btn btn-outline-light" type="button" id="btn-refresh">
-                                <i class="fa-solid fa-sync me-1"></i> 새로고침
-                            </button>
-                        </div>
+                    <div class="d-flex align-items-center">
+                        <span class="text-light me-3">
+                            <i class="fa-solid fa-circle text-success me-1"></i>
+                            <span id="connection-status">연결됨</span>
+                        </span>
+                        <button class="btn btn-outline-light btn-sm" type="button" onclick="refreshData()">
+                            <i class="fa-solid fa-sync me-1"></i> 새로고침
+                        </button>
                     </div>
                 </div>
             </nav>
@@ -65,173 +44,220 @@
         <!-- 메인 콘텐츠 -->
         <main class="app-main">
             <div class="container-fluid h-100">
-                <div class="row h-100">
-                    <!-- 왼쪽 패널: 디자인 목록 및 정보 -->
-                    <div class="col-md-3 h-100 panel-left">
-                        <div class="card h-100">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0">디자인 목록</h5>
-                                <div class="dropdown">
-                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" id="sortDropdown" data-bs-toggle="dropdown">
-                                        정렬
-                                    </button>
-                                    <ul class="dropdown-menu" aria-labelledby="sortDropdown">
-                                        <li><a class="dropdown-item sort-option" href="#" data-sort="reward" data-order="desc">보상 높은순</a></li>
-                                        <li><a class="dropdown-item sort-option" href="#" data-sort="reward" data-order="asc">보상 낮은순</a></li>
-                                        <li><a class="dropdown-item sort-option" href="#" data-sort="timestamp" data-order="desc">최신순</a></li>
-                                        <li><a class="dropdown-item sort-option" href="#" data-sort="timestamp" data-order="asc">오래된순</a></li>
-                                    </ul>
+                
+                <!-- 세션 통계 -->
+                <div class="session-stats">
+                    <div class="stat-card">
+                        <div class="stat-number" id="total-comparisons">0</div>
+                        <div class="stat-label">총 비교 횟수</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="session-progress">0%</div>
+                        <div class="stat-label">세션 진행률</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="current-pair">-</div>
+                        <div class="stat-label">현재 비교 쌍</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="consistency-score">-</div>
+                        <div class="stat-label">일관성 점수</div>
+                    </div>
+                </div>
+
+                <!-- 진행률 바 -->
+                <div class="progress-indicator">
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar bg-primary" role="progressbar" style="width: 0%" id="session-progress-bar"></div>
+                    </div>
+                    <small class="text-muted mt-1 d-block">목표: <span id="target-display">100</span>회 비교</small>
+                </div>
+
+                <!-- 메인 비교 영역 -->
+                <div class="comparison-container">
+                    <!-- 디자인 A -->
+                    <div class="design-comparison-panel" id="design-panel-a">
+                        <div class="design-viewer" id="viewer-a">
+                            <div class="loading-overlay" id="loading-a">
+                                <div class="text-center">
+                                    <div class="spinner-border mb-2" role="status"></div>
+                                    <div>디자인 A 로딩 중...</div>
                                 </div>
                             </div>
-                            <div class="card-body p-0 overflow-auto">
-                                <div class="list-group list-group-flush" id="design-list">
-                                    <!-- 디자인 목록이 여기에 동적으로 추가됩니다 -->
-                                    <div class="list-group-item text-center py-5">
-                                        <div class="spinner-border text-primary mb-2" role="status">
-                                            <span class="visually-hidden">로딩 중...</span>
-                                        </div>
-                                        <p class="mb-0">디자인 목록을 불러오는 중...</p>
-                                    </div>
-                                </div>
+                            <div class="viewer-controls">
+                                <button class="btn btn-sm btn-outline-light" onclick="resetView('a')" title="뷰 리셋">
+                                    <i class="fa-solid fa-home"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-light" onclick="toggleWireframe('a')" title="와이어프레임">
+                                    <i class="fa-solid fa-vector-square"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-light" onclick="captureView('a')" title="캡처">
+                                    <i class="fa-solid fa-camera"></i>
+                                </button>
                             </div>
                         </div>
+                        <div class="design-metrics" id="metrics-a">
+                            <div class="metric-item">
+                                <span class="metric-label">건폐율 (BCR)</span>
+                                <span class="metric-value" id="bcr-a">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">용적률 (FAR)</span>
+                                <span class="metric-value" id="far-a">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">일조량</span>
+                                <span class="metric-value" id="sunlight-a">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">SV Ratio</span>
+                                <span class="metric-value" id="svr-a">-</span>
+                            </div>
+                        </div>
+                        <button class="selection-button" onclick="selectDesign('a')">
+                            <i class="fa-solid fa-check me-2"></i>디자인 A 선택
+                        </button>
                     </div>
 
-                    <!-- 중앙 패널: 3D 뷰어 -->
-                    <div class="col-md-6 h-100 panel-center">
-                        <div class="card h-100">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0" id="viewer-title">3D 뷰어</h5>
-                                <div class="btn-group">
-                                    <button class="btn btn-sm btn-outline-secondary" id="btn-reset-view">
-                                        <i class="fa-solid fa-home"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary" id="btn-wireframe">
-                                        <i class="fa-solid fa-vector-square"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-secondary" id="btn-screenshot">
-                                        <i class="fa-solid fa-camera"></i>
-                                    </button>
+                    <!-- 디자인 B -->
+                    <div class="design-comparison-panel" id="design-panel-b">
+                        <div class="design-viewer" id="viewer-b">
+                            <div class="loading-overlay" id="loading-b">
+                                <div class="text-center">
+                                    <div class="spinner-border mb-2" role="status"></div>
+                                    <div>디자인 B 로딩 중...</div>
                                 </div>
                             </div>
-                            <div class="card-body p-0">
-                                <div id="viewer-container">
-                                    <!-- Three.js 뷰어가 여기에 렌더링됩니다 -->
-                                </div>
+                            <div class="viewer-controls">
+                                <button class="btn btn-sm btn-outline-light" onclick="resetView('b')" title="뷰 리셋">
+                                    <i class="fa-solid fa-home"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-light" onclick="toggleWireframe('b')" title="와이어프레임">
+                                    <i class="fa-solid fa-vector-square"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-light" onclick="captureView('b')" title="캡처">
+                                    <i class="fa-solid fa-camera"></i>
+                                </button>
                             </div>
+                        </div>
+                        <div class="design-metrics" id="metrics-b">
+                            <div class="metric-item">
+                                <span class="metric-label">건폐율 (BCR)</span>
+                                <span class="metric-value" id="bcr-b">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">용적률 (FAR)</span>
+                                <span class="metric-value" id="far-b">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">일조량</span>
+                                <span class="metric-value" id="sunlight-b">-</span>
+                            </div>
+                            <div class="metric-item">
+                                <span class="metric-label">SV Ratio</span>
+                                <span class="metric-value" id="svr-b">-</span>
+                            </div>
+                        </div>
+                        <button class="selection-button" onclick="selectDesign('b')">
+                            <i class="fa-solid fa-check me-2"></i>디자인 B 선택
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 피드백 컨트롤 -->
+                <div class="feedback-controls" id="normal-controls">
+                    <button class="btn btn-secondary" onclick="skipComparison()">
+                        <i class="fa-solid fa-forward me-1"></i> 건너뛰기
+                    </button>
+                    <button class="btn btn-info" onclick="showHelp()">
+                        <i class="fa-solid fa-question-circle me-1"></i> 도움말
+                    </button>
+                    <div class="ms-3">
+                        <label for="target-comparisons" class="form-label me-2">목표 비교 횟수:</label>
+                        <select id="target-comparisons" class="form-select form-select-sm d-inline-block" style="width: auto;" onchange="updateTargetComparisons()">
+                            <option value="20">20회 (테스트)</option>
+                            <option value="50">50회 (간단)</option>
+                            <option value="100" selected>100회 (기본)</option>
+                            <option value="200">200회 (상세)</option>
+                            <option value="500">500회 (전문)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- 세션 완료 컨트롤 -->
+                <div class="session-complete-controls" id="session-complete-controls" style="display: none;">
+                    <h4><i class="fa-solid fa-check-circle me-2"></i>피드백 수집 완료!</h4>
+                    <p>총 <span id="final-comparison-count">0</span>회의 비교를 완료했습니다.</p>
+                    
+                    <!-- 선호한 디자인들 갤러리 -->
+                    <div class="preferred-designs-gallery" id="preferred-gallery" style="display: none;">
+                        <h6>선택하신 디자인들:</h6>
+                        <div class="gallery-container" id="gallery-container">
+                            <!-- 캡처된 이미지들이 여기에 표시됩니다 -->
                         </div>
                     </div>
-
-                    <!-- 오른쪽 패널: 피드백 입력 -->
-                    <div class="col-md-3 h-100 panel-right">
-                        <div class="card h-100">
-                            <div class="card-header">
-                                <h5 class="mb-0">피드백 입력</h5>
-                            </div>
-                            <div class="card-body overflow-auto">
-                                <form id="feedback-form">
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">심미적 품질</label>
-                                        <div class="d-flex align-items-center">
-                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-aesthetic">
-                                            <span class="rating-value" id="rating-aesthetic-value">5.0</span>
-                                        </div>
-                                        <small class="text-muted">형태의 아름다움과 시각적 품질</small>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">기능성</label>
-                                        <div class="d-flex align-items-center">
-                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-functionality">
-                                            <span class="rating-value" id="rating-functionality-value">5.0</span>
-                                        </div>
-                                        <small class="text-muted">목적에 맞는 실용성 및 사용성</small>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">혁신성</label>
-                                        <div class="d-flex align-items-center">
-                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-innovation">
-                                            <span class="rating-value" id="rating-innovation-value">5.0</span>
-                                        </div>
-                                        <small class="text-muted">창의적이고 독특한 디자인 특성</small>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">실현 가능성</label>
-                                        <div class="d-flex align-items-center">
-                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-feasibility">
-                                            <span class="rating-value" id="rating-feasibility-value">5.0</span>
-                                        </div>
-                                        <small class="text-muted">제작 및 구현 용이성</small>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">전체적인 평가</label>
-                                        <div class="d-flex align-items-center">
-                                            <input type="range" class="form-range me-2" min="1" max="10" step="0.1" value="5" id="rating-overall">
-                                            <span class="rating-value" id="rating-overall-value">5.0</span>
-                                        </div>
-                                        <small class="text-muted">종합적인 디자인 품질</small>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label for="feedback-comment" class="form-label fw-bold">코멘트</label>
-                                        <textarea class="form-control" id="feedback-comment" rows="3" placeholder="이 디자인에 대한 추가 의견을 입력하세요..."></textarea>
-                                    </div>
-
-                                    <button type="submit" class="btn btn-primary w-100" id="btn-submit-feedback" disabled>
-                                        <i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출
-                                    </button>
-                                </form>
-
-                                <hr>
-
-                                <div class="design-info mt-3">
-                                    <h6 class="fw-bold">디자인 정보</h6>
-                                    <div class="design-info-content" id="design-info">
-                                        <p class="text-center text-muted py-3">먼저 왼쪽 패널에서 디자인을 선택하세요.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                    
+                    <div class="mt-3">
+                        <button class="btn btn-light btn-lg" onclick="downloadFeedbackData()">
+                            <i class="fa-solid fa-download me-2"></i>피드백 데이터 다운로드
+                        </button>
+                        <button class="btn btn-warning btn-lg" onclick="downloadPreferredImages()">
+                            <i class="fa-solid fa-images me-2"></i>선호 디자인 이미지 다운로드
+                        </button>
+                        <button class="btn btn-success btn-lg" onclick="startNewSession()">
+                            <i class="fa-solid fa-plus me-2"></i>새 세션 시작
+                        </button>
                     </div>
                 </div>
             </div>
         </main>
-
-        <!-- 푸터 -->
-        <footer class="app-footer">
-            <div class="container-fluid">
-                <div class="row">
-                    <div class="col-md-6">
-                        <p class="mb-0">&copy; 2025 Grasshopper RLHF 시스템</p>
-                    </div>
-                    <div class="col-md-6 text-end">
-                        <p class="mb-0">
-                            <i class="fa-solid fa-circle text-success me-1"></i>
-                            <span id="zmq-status">ZMQ 연결 확인 중...</span>
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </footer>
     </div>
 
-    <!-- 모달: 피드백 제출 확인 -->
-    <div class="modal fade" id="feedbackModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog">
+    <!-- 도움말 모달 -->
+    <div class="modal fade" id="helpModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">피드백 제출 완료</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title">쌍대비교 가이드</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>피드백이 성공적으로 제출되었습니다. 소중한 의견에 감사드립니다.</p>
+                    <div class="help-section">
+                        <h6><i class="fa-solid fa-lightbulb me-2"></i>평가 기준 안내</h6>
+                        <ul>
+                            <li><strong>미학적 품질:</strong> 형태의 아름다움, 비례, 시각적 조화를 고려하세요</li>
+                            <li><strong>기능성:</strong> 공간 활용의 효율성, 동선, 실용성을 평가하세요</li>
+                            <li><strong>지속가능성:</strong> 에너지 효율성, 환경 친화성을 고려하세요</li>
+                            <li><strong>맥락 적합성:</strong> 주변 환경과의 조화, 지역성을 고려하세요</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="help-section">
+                        <h6><i class="fa-solid fa-ruler me-2"></i>건축 지표 해석</h6>
+                        <ul>
+                            <li><strong>건폐율(BCR):</strong> 대지 면적 대비 건축 면적 비율 - 70% 미만 권장 (법적 제한)</li>
+                            <li><strong>용적률(FAR):</strong> 대지 면적 대비 연면적 비율 - 200-500% 범위 권장</li>
+                            <li><strong>일조량:</strong> 겨울철 일사량 - 높을수록 양호 (80k-100k kWh 목표)</li>
+                            <li><strong>SV Ratio:</strong> 표면적 대 체적 비율 - 0.7-0.9 범위에서 0.8 최적</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="help-section">
+                        <h6><i class="fa-solid fa-mouse me-2"></i>조작 방법</h6>
+                        <ul>
+                            <li><strong>3D 뷰어:</strong> 마우스로 회전, 휠로 확대/축소, 드래그로 이동</li>
+                            <li><strong>키보드 단축키:</strong> Ctrl+1 (왼쪽 선택), Ctrl+2 (오른쪽 선택), Ctrl+S (건너뛰기)</li>
+                            <li><strong>뷰어 컨트롤:</strong> 홈 버튼(뷰 리셋), 와이어프레임 토글, 캡처 버튼</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="help-section">
+                        <h6><i class="fa-solid fa-brain me-2"></i>학습 과정</h6>
+                        <p>여러분의 선택은 AI가 건축적 선호도를 학습하는 데 사용됩니다. 일관된 기준으로 평가해주시면 더 좋은 학습 결과를 얻을 수 있습니다.</p>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
-                    <button type="button" class="btn btn-primary" id="btn-next-design">다음 디자인</button>
                 </div>
             </div>
         </div>
@@ -240,1459 +266,709 @@
     <!-- Bootstrap JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
     
-    <!-- 통합 스크립트 - 이전 스크립트 모두 대체 -->
+    <!-- 메인 애플리케이션 스크립트 -->
     <script>
-        // Three.js 뷰어 관련 문제 해결을 위한 수정된 코드 부분
-        // index.html 파일의 DOMContentLoaded 내부에 들어갈 함수
-
-        // 전역 변수들
-        let scene, camera, renderer, controls;
-
-        // Three.js 라이브러리 로드 확인
-        function checkThreeJsLoaded() {
-            if (typeof THREE === 'undefined') {
-                console.error('Three.js 라이브러리가 로드되지 않았습니다!');
+        /**
+         * Grasshopper RLHF - 핵심 기능만 포함한 메인 애플리케이션
+         */
+        
+        class RLHFInterface {
+            constructor() {
+                this.currentSession = {
+                    id: null,
+                    totalComparisons: 0,
+                    targetComparisons: 100,
+                    currentPair: null,
+                    feedbackData: [],
+                    preferredCaptures: [], // 선호한 디자인 캡처들
+                    isComplete: false
+                };
                 
-                // 뷰어 컨테이너에 오류 메시지 표시
-                const viewerContainer = document.getElementById('viewer-container');
-                if (viewerContainer) {
-                    viewerContainer.innerHTML = `
-                        <div class="d-flex justify-content-center align-items-center h-100 text-light">
-                            <div class="text-center">
-                                <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
-                                <p>Three.js 라이브러리를 로드할 수 없습니다.</p>
-                                <p class="small">브라우저 콘솔을 확인해 주세요.</p>
-                            </div>
-                        </div>
-                    `;
-                }
-                return false;
+                this.currentDesigns = { a: null, b: null };
+                this.scenes = { a: null, b: null };
+                this.cameras = { a: null, b: null };
+                this.renderers = { a: null, b: null };
+                this.controls = { a: null, b: null };
+                
+                this.init();
             }
-            return true;
-        }
-
-        // 3D 모델 로드 함수
-        async function loadMesh(designId) {
-            const viewerContainer = document.getElementById('viewer-container');
-            if (!viewerContainer) return;
             
-            // 라이브러리 로드 확인
-            if (!checkThreeJsLoaded()) return;
-            
-            // 로딩 표시
-            viewerContainer.innerHTML = `
-                <div class="viewer-loading">
-                    <div class="spinner-border text-light mb-2" role="status">
-                        <span class="visually-hidden">로딩 중...</span>
-                    </div>
-                    <p class="mb-0">3D 모델 로딩 중...</p>
-                </div>
-            `;
-            
-            try {
-                console.log(`메쉬 데이터 요청 중: ${designId}`);
-                const response = await fetch(`/api/mesh/${designId}`);
-                const data = await response.json();
+            async init() {
+                console.log('RLHF Interface 초기화 중...');
                 
-                if (data.status === 'error') {
-                    console.error('메쉬 로드 오류:', data.message);
-                    viewerContainer.innerHTML = `
-                        <div class="d-flex justify-content-center align-items-center h-100">
-                            <div class="text-center text-light">
-                                <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
-                                <p>3D 메쉬를 로드할 수 없습니다.</p>
-                                <p class="small">${data.message}</p>
-                            </div>
-                        </div>
-                    `;
-                    return;
-                }
+                // 3D 뷰어 초기화
+                this.initializeViewers();
                 
-                console.log('메쉬 데이터 수신됨:', data.mesh ? '있음' : '없음');
+                // 이벤트 리스너 설정
+                this.setupEventListeners();
                 
-                // Three.js 뷰어 초기화
-                initThreeViewer(data.mesh);
+                // 세션 시작
+                await this.startNewSession();
                 
-            } catch (error) {
-                console.error('메쉬 데이터 요청 오류:', error);
-                viewerContainer.innerHTML = `
-                    <div class="d-flex justify-content-center align-items-center h-100">
-                        <div class="text-center text-light">
-                            <i class="fa-solid fa-circle-exclamation fs-1 mb-3"></i>
-                            <p>서버 요청 중 오류가 발생했습니다.</p>
-                            <p class="small">${error.message}</p>
-                        </div>
-                    </div>
-                `;
+                // 첫 번째 비교 쌍 로드
+                await this.loadNextComparison();
+                
+                console.log('RLHF Interface 초기화 완료');
             }
-        }
-
-        // Three.js 뷰어 초기화
-        function initThreeViewer(meshData) {
-            try {
-                console.log('Three.js 뷰어 초기화 시작');
+            
+            initializeViewers() {
+                ['a', 'b'].forEach(side => this.initViewer(side));
+            }
+            
+            initViewer(side) {
+                const container = document.getElementById(`viewer-${side}`);
+                if (!container) return;
                 
-                const viewerContainer = document.getElementById('viewer-container');
-                if (!viewerContainer) {
-                    console.error('뷰어 컨테이너 요소를 찾을 수 없습니다!');
-                    return;
-                }
+                const width = container.clientWidth;
+                const height = container.clientHeight;
                 
-                // 기존 콘텐츠 및 Three.js 요소 정리
-                cleanup3dViewer();
+                // Scene 생성
+                this.scenes[side] = new THREE.Scene();
+                this.scenes[side].background = new THREE.Color(0x2c3e50);
                 
-                // 기존 콘텐츠 제거
-                viewerContainer.innerHTML = '';
+                // Camera 생성
+                this.cameras[side] = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+                this.cameras[side].position.set(5, 5, 5);
+                this.cameras[side].lookAt(0, 0, 0);
                 
-                // 뷰어 초기화 로직
-                scene = new THREE.Scene();
-                scene.background = new THREE.Color(0x2c3e50);
+                // Renderer 생성
+                this.renderers[side] = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+                this.renderers[side].setSize(width, height);
+                this.renderers[side].setPixelRatio(window.devicePixelRatio);
                 
-                const width = viewerContainer.clientWidth || 400; // 기본값 설정
-                const height = viewerContainer.clientHeight || 300; // 기본값 설정
+                // 컨테이너에 추가
+                const loadingOverlay = container.querySelector('.loading-overlay');
+                container.insertBefore(this.renderers[side].domElement, loadingOverlay);
                 
-                console.log(`뷰어 크기: ${width}x${height}`);
-                
-                camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-                camera.position.set(5, 5, 5);
-                camera.lookAt(0, 0, 0);
-                
-                // 렌더러 생성
-                renderer = new THREE.WebGLRenderer({ antialias: true });
-                renderer.setSize(width, height);
-                renderer.setPixelRatio(window.devicePixelRatio);
-                renderer.shadowMap.enabled = true;
-                
-                // 렌더러를 컨테이너에 추가
-                viewerContainer.appendChild(renderer.domElement);
-                
-                // 오류 확인
-                if (!viewerContainer.contains(renderer.domElement)) {
-                    console.error('렌더러 요소가 DOM에 추가되지 않았습니다!');
-                }
-                
-                // 컨트롤 생성
-                controls = new THREE.OrbitControls(camera, renderer.domElement);
-                controls.enableDamping = true;
-                controls.dampingFactor = 0.05;
+                // Controls 생성
+                this.controls[side] = new THREE.OrbitControls(this.cameras[side], this.renderers[side].domElement);
+                this.controls[side].enableDamping = true;
+                this.controls[side].dampingFactor = 0.05;
                 
                 // 조명 추가
+                this.setupLights(side);
+                
+                // 애니메이션 루프 시작
+                this.animate(side);
+            }
+            
+            setupLights(side) {
+                const scene = this.scenes[side];
+                
+                // 조명 설정
                 const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
                 scene.add(ambientLight);
                 
-                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                directionalLight.position.set(5, 10, 7);
-                directionalLight.castShadow = true;
-                scene.add(directionalLight);
+                const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                mainLight.position.set(5, 10, 7);
+                scene.add(mainLight);
                 
                 const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
                 fillLight.position.set(-5, 5, -5);
                 scene.add(fillLight);
                 
-                // 그리드 헬퍼
+                // 그리드 및 축 헬퍼
                 const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
                 scene.add(gridHelper);
                 
-                // 축 헬퍼
                 const axesHelper = new THREE.AxesHelper(2);
                 scene.add(axesHelper);
-                
-                console.log('기본 장면 설정 완료');
-                
-                // 메쉬 데이터 로드
-                let meshesLoaded = 0;
-                if (meshData && meshData.meshes && Array.isArray(meshData.meshes)) {
-                    console.log(`로드할 메쉬 수: ${meshData.meshes.length}`);
-                    const meshes = [];
+            }
+            
+            animate(side) {
+                const animateFrame = () => {
+                    requestAnimationFrame(animateFrame);
                     
-                    meshData.meshes.forEach((meshInfo, index) => {
-                        console.log(`메쉬 ${index + 1} 처리 중...`);
-                        if (!meshInfo.vertices || !meshInfo.faces) {
-                            console.warn(`메쉬 ${index + 1}에 정점 또는 면 데이터가 없습니다.`);
-                            return;
-                        }
-                        
-                        // 지오메트리 생성
-                        const geometry = new THREE.BufferGeometry();
-                        
-                        // 정점 설정
-                        const vertices = [];
-                        for (let i = 0; i < meshInfo.vertices.length; i++) {
-                            const vertex = meshInfo.vertices[i];
-                            vertices.push(vertex[0], vertex[1], vertex[2]);
-                        }
-                        
-                        console.log(`정점 수: ${meshInfo.vertices.length}`);
-                        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-                        
-                        // 인덱스 설정
-                        const indices = [];
-                        for (let i = 0; i < meshInfo.faces.length; i++) {
-                            const face = meshInfo.faces[i];
-                            if (face.length === 3) {
-                                indices.push(face[0], face[1], face[2]);
-                            } else if (face.length === 4) {
-                                // 쿼드를 두 개의 삼각형으로 변환
-                                indices.push(face[0], face[1], face[2]);
-                                indices.push(face[0], face[2], face[3]);
-                            }
-                        }
-                        
-                        console.log(`면 수: ${meshInfo.faces.length}`);
-                        
-                        if (indices.length > 0) {
-                            geometry.setIndex(indices);
-                        }
-                        
-                        // 법선 설정
-                        if (meshInfo.normals && meshInfo.normals.length > 0) {
-                            const normals = [];
-                            for (let i = 0; i < meshInfo.normals.length; i++) {
-                                const normal = meshInfo.normals[i];
-                                normals.push(normal[0], normal[1], normal[2]);
-                            }
-                            geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-                            console.log(`법선 수: ${meshInfo.normals.length}`);
-                        } else {
-                            console.log('법선 자동 계산 중...');
-                            geometry.computeVertexNormals();
-                        }
-                        
-                        // 재질 생성
-                        const material = new THREE.MeshPhongMaterial({
-                            color: 0x3498db,
-                            specular: 0x111111,
-                            shininess: 30,
-                            flatShading: false,
-                            side: THREE.DoubleSide
-                        });
-                        
-                        // 메쉬 생성 및 추가
-                        const mesh = new THREE.Mesh(geometry, material);
-                        mesh.castShadow = true;
-                        mesh.receiveShadow = true;
-                        scene.add(mesh);
-                        meshes.push(mesh);
-                        meshesLoaded++;
-                    });
-                    
-                    console.log(`${meshesLoaded}개 메쉬 로드 완료`);
-                    
-                    // 메쉬 그룹 생성 및 중앙 정렬
-                    if (meshes.length > 0) {
-                        const group = new THREE.Group();
-                        meshes.forEach(mesh => group.add(mesh.clone()));
-                        
-                        const box = new THREE.Box3().setFromObject(group);
-                        const center = new THREE.Vector3();
-                        box.getCenter(center);
-                        
-                        // 메쉬를 중앙으로 이동
-                        meshes.forEach(mesh => {
-                            mesh.position.sub(center);
-                        });
-                        
-                        // 카메라 위치 조정
-                        const size = new THREE.Vector3();
-                        box.getSize(size);
-                        const maxDim = Math.max(size.x, size.y, size.z);
-                        const fov = camera.fov * (Math.PI / 180);
-                        let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * 1.5; // 안전 마진 추가
-                        
-                        camera.position.set(cameraDistance, cameraDistance, cameraDistance);
-                        camera.lookAt(0, 0, 0);
-                        controls.target.set(0, 0, 0);
-                        controls.update();
-                        
-                        console.log('카메라 및 컨트롤 설정 완료');
+                    if (this.controls[side]) {
+                        this.controls[side].update();
                     }
-                } else {
-                    console.warn('유효한 메쉬 데이터가 없습니다.');
-                    // 기본 큐브 추가 (테스트용)
-                    const geometry = new THREE.BoxGeometry(1, 1, 1);
-                    const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
-                    const cube = new THREE.Mesh(geometry, material);
-                    scene.add(cube);
-                    console.log('기본 큐브 추가됨 (메쉬 데이터 없음)');
-                }
+                    
+                    if (this.renderers[side] && this.scenes[side] && this.cameras[side]) {
+                        this.renderers[side].render(this.scenes[side], this.cameras[side]);
+                    }
+                };
+                animateFrame();
+            }
+            
+            setupEventListeners() {
+                // 창 크기 변경 이벤트
+                window.addEventListener('resize', () => this.handleResize());
                 
-                // 화면 크기 변경 이벤트 리스너
-                window.addEventListener('resize', handleResize);
-                
-                // 버튼 이벤트 리스너 설정
-                setupButtonListeners();
-                
-                // 애니메이션 루프 시작
-                animate();
-                
-                console.log('Three.js 뷰어 초기화 완료');
-            } catch (error) {
-                console.error('Three.js 초기화 오류:', error);
-                
-                const viewerContainer = document.getElementById('viewer-container');
-                if (viewerContainer) {
-                    viewerContainer.innerHTML = `
-                        <div class="d-flex justify-content-center align-items-center h-100">
-                            <div class="text-center text-light">
-                                <i class="fa-solid fa-bug fs-1 mb-3"></i>
-                                <p>3D 뷰어 초기화 오류</p>
-                                <p class="small">${error.message}</p>
-                            </div>
-                        </div>
-                    `;
+                // 키보드 단축키
+                document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+            }
+            
+            handleResize() {
+                ['a', 'b'].forEach(side => {
+                    const container = document.getElementById(`viewer-${side}`);
+                    if (!container || !this.cameras[side] || !this.renderers[side]) return;
+                    
+                    const width = container.clientWidth;
+                    const height = container.clientHeight;
+                    
+                    this.cameras[side].aspect = width / height;
+                    this.cameras[side].updateProjectionMatrix();
+                    this.renderers[side].setSize(width, height);
+                });
+            }
+            
+            handleKeyboard(e) {
+                if (e.ctrlKey) {
+                    switch(e.key) {
+                        case '1':
+                            e.preventDefault();
+                            this.selectDesign('a');
+                            break;
+                        case '2':
+                            e.preventDefault();
+                            this.selectDesign('b');
+                            break;
+                        case 's':
+                            e.preventDefault();
+                            this.skipComparison();
+                            break;
+                    }
                 }
             }
-        }
-
-        // 화면 크기 변경 처리
-        function handleResize() {
-            if (!camera || !renderer || !document.getElementById('viewer-container')) return;
             
-            const viewerContainer = document.getElementById('viewer-container');
-            const width = viewerContainer.clientWidth;
-            const height = viewerContainer.clientHeight;
+            async startNewSession() {
+                this.currentSession.id = 'session_' + Date.now();
+                this.currentSession.totalComparisons = 0;
+                this.currentSession.feedbackData = [];
+                this.currentSession.preferredCaptures = [];
+                this.currentSession.isComplete = false;
+                this.updateSessionStats();
+            }
             
-            camera.aspect = width / height;
-            camera.updateProjectionMatrix();
-            
-            renderer.setSize(width, height);
-        }
-
-        // 버튼 이벤트 리스너 설정
-        function setupButtonListeners() {
-            // 와이어프레임 전환 버튼
-            const wireframeButton = document.getElementById('btn-wireframe');
-            if (wireframeButton) {
-                wireframeButton.addEventListener('click', function() {
-                    if (!scene) return;
+            async loadNextComparison() {
+                if (this.currentSession.isComplete) return;
+                
+                try {
+                    this.showLoading(true);
                     
-                    scene.traverse(object => {
-                        if (object instanceof THREE.Mesh) {
+                    // 실제 구현에서는 서버에서 비교 쌍을 가져옴
+                    // 현재는 목 데이터 사용
+                    const mockDesigns = await this.getMockComparisonPair();
+                    
+                    await this.loadDesignPair(mockDesigns.design_a, mockDesigns.design_b);
+                    this.currentSession.currentPair = {
+                        a: mockDesigns.design_a.id,
+                        b: mockDesigns.design_b.id
+                    };
+                    this.updateSessionStats();
+                    
+                } catch (error) {
+                    console.error('비교 쌍 로드 오류:', error);
+                    this.showError('새로운 비교 쌍을 불러올 수 없습니다.');
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+            
+            async getMockComparisonPair() {
+                // 목 데이터 - 실제 구현에서는 API 호출로 대체
+                return {
+                    design_a: {
+                        id: `design_a_${Date.now()}`,
+                        state: [0.45, 3.2, 85000, 0.78], // BCR, FAR, Sunlight, SVR
+                        mesh_data: null
+                    },
+                    design_b: {
+                        id: `design_b_${Date.now()}`,
+                        state: [0.62, 4.1, 72000, 0.92],
+                        mesh_data: null
+                    }
+                };
+            }
+            
+            async loadDesignPair(designA, designB) {
+                await Promise.all([
+                    this.loadDesignToViewer('a', designA),
+                    this.loadDesignToViewer('b', designB)
+                ]);
+            }
+            
+            async loadDesignToViewer(side, designData) {
+                this.currentDesigns[side] = designData;
+                
+                // 메트릭 업데이트
+                this.updateMetrics(side, designData);
+                
+                // 3D 모델 로드 (목 데이터로 기본 큐브 생성)
+                this.loadMockMesh(side);
+            }
+            
+            loadMockMesh(side) {
+                const scene = this.scenes[side];
+                
+                // 기존 메시 제거
+                this.clearMeshes(side);
+                
+                // 기본 큐브 생성 (실제 구현에서는 서버에서 메시 데이터 로드)
+                const geometry = new THREE.BoxGeometry(1, 1, 1);
+                const material = new THREE.MeshPhongMaterial({
+                    color: side === 'a' ? 0x3498db : 0xe74c3c
+                });
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.userData.isDesignMesh = true;
+                scene.add(mesh);
+            }
+            
+            clearMeshes(side) {
+                const scene = this.scenes[side];
+                const meshesToRemove = [];
+                
+                scene.traverse(object => {
+                    if (object.userData.isDesignMesh) {
+                        meshesToRemove.push(object);
+                    }
+                });
+                
+                meshesToRemove.forEach(mesh => {
+                    scene.remove(mesh);
+                    if (mesh.geometry) mesh.geometry.dispose();
+                    if (mesh.material) mesh.material.dispose();
+                });
+            }
+            
+            updateMetrics(side, designData) {
+                const state = designData.state || [];
+                const metrics = {
+                    bcr: this.formatMetric(state[0] * 100, '%', [0, 70]),
+                    far: this.formatMetric(state[1] * 100, '%', [200, 500]),
+                    sunlight: this.formatMetric(state[2], 'kWh', [80000, 100000]),
+                    svr: this.formatMetric(state[3], '', [0.7, 0.9])
+                };
+                
+                Object.entries(metrics).forEach(([key, {value, className}]) => {
+                    const element = document.getElementById(`${key}-${side}`);
+                    if (element) {
+                        element.textContent = value;
+                        element.className = `metric-value ${className}`;
+                    }
+                });
+            }
+            
+            formatMetric(value, unit, goodRange = null) {
+                if (value === null || value === undefined || isNaN(value)) {
+                    return { value: 'N/A', className: '' };
+                }
+                
+                let formattedValue;
+                if (unit === '%') {
+                    formattedValue = `${value.toFixed(1)}${unit}`;
+                } else if (unit === 'kWh') {
+                    formattedValue = `${(value/1000).toFixed(1)}k${unit}`;
+                } else {
+                    formattedValue = `${value.toFixed(2)}${unit}`;
+                }
+                
+                let className = '';
+                if (goodRange) {
+                    if (value >= goodRange[0] && value <= goodRange[1]) {
+                        className = 'good';
+                    } else if (Math.abs(value - goodRange[0]) <= (goodRange[1] - goodRange[0]) * 0.2 ||
+                              Math.abs(value - goodRange[1]) <= (goodRange[1] - goodRange[0]) * 0.2) {
+                        className = 'warning';
+                    } else {
+                        className = 'danger';
+                    }
+                }
+                
+                return { value: formattedValue, className };
+            }
+            
+            async selectDesign(selectedSide) {
+                if (this.currentSession.isComplete) return;
+                
+                try {
+                    const designA = this.currentDesigns.a;
+                    const designB = this.currentDesigns.b;
+                    
+                    if (!designA || !designB) {
+                        this.showError('디자인 데이터가 완전하지 않습니다.');
+                        return;
+                    }
+                    
+                    // 선택 효과 표시
+                    this.showSelectionEffect(selectedSide);
+                    
+                    // 선택된 디자인 캡처
+                    const captureData = this.captureSelectedDesign(selectedSide);
+                    this.currentSession.preferredCaptures.push(captureData);
+                    
+                    // 피드백 데이터 구성
+                    const feedbackData = {
+                        session_id: this.currentSession.id,
+                        design_a_id: designA.id,
+                        design_b_id: designB.id,
+                        selected_design: selectedSide === 'a' ? designA.id : designB.id,
+                        comparison_time: Date.now(),
+                        design_a_state: designA.state,
+                        design_b_state: designB.state
+                    };
+                    
+                    this.currentSession.feedbackData.push(feedbackData);
+                    this.currentSession.totalComparisons++;
+                    this.updateSessionStats();
+                    
+                    // 세션 완료 체크
+                    if (this.currentSession.totalComparisons >= this.currentSession.targetComparisons) {
+                        this.completeSession();
+                    } else {
+                        // 다음 비교로 이동
+                        setTimeout(() => {
+                            this.loadNextComparison();
+                        }, 1500);
+                    }
+                    
+                } catch (error) {
+                    console.error('디자인 선택 오류:', error);
+                    this.showError('선택 처리 중 오류가 발생했습니다.');
+                }
+            }
+            
+            captureSelectedDesign(selectedSide) {
+                const renderer = this.renderers[selectedSide];
+                const design = this.currentDesigns[selectedSide];
+                
+                return {
+                    design_id: design.id,
+                    side: selectedSide,
+                    timestamp: Date.now(),
+                    image_data: renderer.domElement.toDataURL('image/png'),
+                    state: design.state
+                };
+            }
+            
+            showSelectionEffect(selectedSide) {
+                const panelA = document.getElementById('design-panel-a');
+                const panelB = document.getElementById('design-panel-b');
+                
+                panelA.classList.remove('selected');
+                panelB.classList.remove('selected');
+                
+                const selectedPanel = selectedSide === 'a' ? panelA : panelB;
+                selectedPanel.classList.add('selected');
+                
+                // 버튼 텍스트 임시 변경
+                const button = selectedPanel.querySelector('.selection-button');
+                const originalHTML = button.innerHTML;
+                button.innerHTML = '<i class="fa-solid fa-check me-2"></i>선택됨!';
+                button.style.background = '#2ecc71';
+                
+                setTimeout(() => {
+                    button.innerHTML = originalHTML;
+                    button.style.background = '';
+                    selectedPanel.classList.remove('selected');
+                }, 1500);
+            }
+            
+            updateSessionStats() {
+                document.getElementById('total-comparisons').textContent = this.currentSession.totalComparisons;
+                
+                const progress = (this.currentSession.totalComparisons / this.currentSession.targetComparisons) * 100;
+                document.getElementById('session-progress').textContent = `${Math.round(progress)}%`;
+                document.getElementById('session-progress-bar').style.width = `${progress}%`;
+                
+                if (this.currentSession.currentPair) {
+                    document.getElementById('current-pair').textContent = 
+                        `${this.currentSession.currentPair.a.split('_')[0]} vs ${this.currentSession.currentPair.b.split('_')[0]}`;
+                }
+                
+                // 일관성 점수 (간단한 계산)
+                if (this.currentSession.feedbackData.length > 5) {
+                    const consistencyScore = this.calculateConsistencyScore();
+                    document.getElementById('consistency-score').textContent = `${Math.round(consistencyScore * 100)}%`;
+                }
+            }
+            
+            calculateConsistencyScore() {
+                // 간단한 일관성 점수 계산 (실제로는 더 복잡한 알고리즘 필요)
+                return Math.random() * 0.3 + 0.7; // 70-100% 범위
+            }
+            
+            completeSession() {
+                this.currentSession.isComplete = true;
+                
+                // 컨트롤 전환
+                document.getElementById('normal-controls').style.display = 'none';
+                document.getElementById('session-complete-controls').style.display = 'block';
+                document.getElementById('final-comparison-count').textContent = this.currentSession.totalComparisons;
+                
+                // 선호한 디자인 갤러리 표시
+                this.showPreferredGallery();
+                
+                this.showNotification(
+                    `축하합니다! ${this.currentSession.totalComparisons}회의 비교를 완료했습니다.`, 
+                    'success'
+                );
+            }
+            
+            showPreferredGallery() {
+                const gallery = document.getElementById('preferred-gallery');
+                const container = document.getElementById('gallery-container');
+                
+                if (this.currentSession.preferredCaptures.length > 0) {
+                    gallery.style.display = 'block';
+                    container.innerHTML = '';
+                    
+                    this.currentSession.preferredCaptures.forEach((capture, index) => {
+                        const imgElement = document.createElement('div');
+                        imgElement.className = 'gallery-item';
+                        imgElement.innerHTML = `
+                            <img src="${capture.image_data}" alt="선호 디자인 ${index + 1}" class="gallery-image">
+                            <div class="gallery-info">
+                                <small>디자인 ${capture.design_id.split('_')[1]} (${capture.side.toUpperCase()})</small>
+                            </div>
+                        `;
+                        container.appendChild(imgElement);
+                    });
+                }
+            }
+            
+            updateTargetComparisons() {
+                const targetSelect = document.getElementById('target-comparisons');
+                this.currentSession.targetComparisons = parseInt(targetSelect.value);
+                document.getElementById('target-display').textContent = this.currentSession.targetComparisons;
+                this.updateSessionStats();
+                
+                this.showNotification(
+                    `목표 비교 횟수가 ${this.currentSession.targetComparisons}회로 변경되었습니다.`, 
+                    'info'
+                );
+            }
+            
+            skipComparison() {
+                if (confirm('이 비교를 건너뛰시겠습니까?')) {
+                    this.loadNextComparison();
+                }
+            }
+            
+            async downloadFeedbackData() {
+                try {
+                    const feedbackDataset = this.prepareFeedbackDataset();
+                    
+                    const blob = new Blob([JSON.stringify(feedbackDataset, null, 2)], 
+                                         { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `rlhf_feedback_data_${this.currentSession.id}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    this.showNotification('피드백 데이터가 다운로드되었습니다.', 'success');
+                    
+                } catch (error) {
+                    console.error('데이터 다운로드 오류:', error);
+                    this.showError('데이터 다운로드 중 오류가 발생했습니다.');
+                }
+            }
+            
+            prepareFeedbackDataset() {
+                return {
+                    format_version: "1.0",
+                    rlhf_standard: "bradley_terry",
+                    metadata: {
+                        session_id: this.currentSession.id,
+                        total_comparisons: this.currentSession.totalComparisons,
+                        target_comparisons: this.currentSession.targetComparisons,
+                        created_at: new Date().toISOString(),
+                        consistency_score: this.calculateConsistencyScore(),
+                        state_dimensions: 4,
+                        state_labels: ["BCR", "FAR", "Sunlight", "SV_Ratio"]
+                    },
+                    preference_pairs: this.currentSession.feedbackData.map(feedback => ({
+                        preferred: {
+                            state: feedback.selected_design === feedback.design_a_id ? 
+                                   feedback.design_a_state : feedback.design_b_state,
+                            design_id: feedback.selected_design
+                        },
+                        rejected: {
+                            state: feedback.selected_design === feedback.design_a_id ? 
+                                   feedback.design_b_state : feedback.design_a_state,
+                            design_id: feedback.selected_design === feedback.design_a_id ? 
+                                       feedback.design_b_id : feedback.design_a_id
+                        },
+                        timestamp: feedback.comparison_time,
+                        session_info: {
+                            session_id: feedback.session_id
+                        }
+                    }))
+                };
+            }
+            
+            async downloadPreferredImages() {
+                if (this.currentSession.preferredCaptures.length === 0) {
+                    this.showError('저장된 선호 디자인 이미지가 없습니다.');
+                    return;
+                }
+                
+                try {
+                    // ZIP 파일로 묶어서 다운로드하는 것이 이상적이지만, 
+                    // 브라우저 환경에서는 각각 개별 다운로드
+                    for (let i = 0; i < this.currentSession.preferredCaptures.length; i++) {
+                        const capture = this.currentSession.preferredCaptures[i];
+                        const link = document.createElement('a');
+                        link.href = capture.image_data;
+                        link.download = `preferred_design_${i + 1}_${capture.design_id}.png`;
+                        link.click();
+                        
+                        // 짧은 지연으로 브라우저가 다운로드를 처리할 시간 제공
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                    }
+                    
+                    this.showNotification(
+                        `${this.currentSession.preferredCaptures.length}개의 선호 디자인 이미지가 다운로드되었습니다.`, 
+                        'success'
+                    );
+                    
+                } catch (error) {
+                    console.error('이미지 다운로드 오류:', error);
+                    this.showError('이미지 다운로드 중 오류가 발생했습니다.');
+                }
+            }
+            
+            startNewSessionConfirm() {
+                if (confirm('새로운 피드백 세션을 시작하시겠습니까? 현재 진행 상황은 저장됩니다.')) {
+                    location.reload();
+                }
+            }
+            
+            showLoading(show) {
+                ['a', 'b'].forEach(side => {
+                    const loading = document.getElementById(`loading-${side}`);
+                    if (loading) {
+                        loading.style.display = show ? 'flex' : 'none';
+                    }
+                });
+            }
+            
+            showError(message) {
+                this.showNotification(message, 'error');
+            }
+            
+            showNotification(message, type = 'info') {
+                let toastContainer = document.querySelector('.toast-container');
+                if (!toastContainer) {
+                    toastContainer = document.createElement('div');
+                    toastContainer.className = 'toast-container';
+                    document.body.appendChild(toastContainer);
+                }
+                
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                
+                let icon = 'fa-info-circle';
+                switch(type) {
+                    case 'success': icon = 'fa-check-circle'; break;
+                    case 'error': icon = 'fa-exclamation-circle'; break;
+                    case 'warning': icon = 'fa-exclamation-triangle'; break;
+                }
+                
+                notification.innerHTML = `
+                    <i class="fa-solid ${icon} me-2"></i>
+                    ${message}
+                `;
+                
+                toastContainer.appendChild(notification);
+                
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 3000);
+            }
+            
+            resetView(side) {
+                if (this.cameras[side] && this.controls[side]) {
+                    this.cameras[side].position.set(5, 5, 5);
+                    this.cameras[side].lookAt(0, 0, 0);
+                    this.controls[side].target.set(0, 0, 0);
+                    this.controls[side].update();
+                }
+            }
+            
+            toggleWireframe(side) {
+                if (this.scenes[side]) {
+                    this.scenes[side].traverse(object => {
+                        if (object.userData.isDesignMesh && object.material) {
                             object.material.wireframe = !object.material.wireframe;
                         }
                     });
-                    
-                    this.classList.toggle('active');
-                });
+                }
             }
             
-            // 뷰 리셋 버튼
-            const resetButton = document.getElementById('btn-reset-view');
-            if (resetButton) {
-                resetButton.addEventListener('click', function() {
-                    if (!camera || !controls) return;
+            captureView(side) {
+                if (this.renderers[side]) {
+                    const dataUrl = this.renderers[side].domElement.toDataURL('image/png');
+                    const link = document.createElement('a');
+                    link.href = dataUrl;
+                    link.download = `design_${side}_capture_${Date.now()}.png`;
+                    link.click();
                     
-                    camera.position.set(5, 5, 5);
-                    camera.lookAt(0, 0, 0);
-                    controls.target.set(0, 0, 0);
-                    controls.update();
-                });
-            }
-            
-            // 스크린샷 버튼
-            const screenshotButton = document.getElementById('btn-screenshot');
-            if (screenshotButton) {
-                screenshotButton.addEventListener('click', function() {
-                    if (!renderer) return;
-                    
-                    const dataUrl = renderer.domElement.toDataURL('image/png');
-                    
-                    // 스크린샷 표시
-                    const container = document.createElement('div');
-                    container.className = 'screenshot-container';
-                    
-                    const img = document.createElement('img');
-                    img.src = dataUrl;
-                    img.className = 'screenshot-image';
-                    
-                    const controls = document.createElement('div');
-                    controls.className = 'screenshot-controls';
-                    
-                    const closeButton = document.createElement('button');
-                    closeButton.className = 'btn btn-light me-2';
-                    closeButton.innerHTML = '<i class="fa-solid fa-times"></i>';
-                    closeButton.addEventListener('click', () => {
-                        document.body.removeChild(container);
-                    });
-                    
-                    const downloadButton = document.createElement('button');
-                    downloadButton.className = 'btn btn-primary';
-                    downloadButton.innerHTML = '<i class="fa-solid fa-download me-1"></i> 다운로드';
-                    downloadButton.addEventListener('click', () => {
-                        const link = document.createElement('a');
-                        link.href = dataUrl;
-                        link.download = `design-${window.currentDesignId || 'screenshot'}.png`;
-                        link.click();
-                    });
-                    
-                    controls.appendChild(closeButton);
-                    controls.appendChild(downloadButton);
-                    
-                    container.appendChild(img);
-                    container.appendChild(controls);
-                    document.body.appendChild(container);
-                });
+                    this.showNotification(`디자인 ${side.toUpperCase()} 캡처가 다운로드되었습니다.`, 'success');
+                }
             }
         }
-
-        // 애니메이션 루프
-        function animate() {
-            if (!scene || !camera || !renderer) return;
-            
-            requestAnimationFrame(animate);
-            
-            // 컨트롤 업데이트
-            if (controls) {
-                controls.update();
-            }
-            
-            // 렌더링
-            renderer.render(scene, camera);
+        
+        // 전역 함수들
+        let rlhfInterface;
+        
+        function selectDesign(side) {
+            if (rlhfInterface) rlhfInterface.selectDesign(side);
         }
-
-        // 3D 뷰어 정리
-        function cleanup3dViewer() {
-            // 이전에 렌더러가 있었다면 정리
-            if (renderer) {
-                renderer.dispose();
-                // DOM에서 제거
-                const viewerContainer = document.getElementById('viewer-container');
-                if (viewerContainer && renderer.domElement && renderer.domElement.parentNode === viewerContainer) {
-                    viewerContainer.removeChild(renderer.domElement);
-                }
-            }
-            
-            // 리사이즈 이벤트 리스너 제거
-            window.removeEventListener('resize', handleResize);
-            
-            // 메모리 정리를 위해 참조 제거
-            if (scene) {
-                disposeScene(scene);
-            }
-            
-            scene = null;
-            camera = null;
-            renderer = null;
-            controls = null;
+        
+        function skipComparison() {
+            if (rlhfInterface) rlhfInterface.skipComparison();
         }
-
-        // 장면 내 리소스 정리
-        function disposeScene(scene) {
-            scene.traverse((object) => {
-                if (object.geometry) {
-                    object.geometry.dispose();
-                }
-                
-                if (object.material) {
-                    if (Array.isArray(object.material)) {
-                        object.material.forEach(material => disposeMaterial(material));
-                    } else {
-                        disposeMaterial(object.material);
-                    }
-                }
-            });
+        
+        function showHelp() {
+            const modal = new bootstrap.Modal(document.getElementById('helpModal'));
+            modal.show();
         }
-
-        // 3D 뷰어 메모리 정리 부분 수정
-        function disposeMaterial(material) {
-            // 재질의 모든 텍스처 정리
-            for (const key in material) {
-                const value = material[key];
-                // dispose 메서드가 있는 경우에만 호출
-                if (value && typeof value === 'object' && typeof value.dispose === 'function') {
-                    value.dispose();
-                }
-            }
-            // 재질 자체의 dispose 호출
-            if (typeof material.dispose === 'function') {
-                material.dispose();
+        
+        function updateTargetComparisons() {
+            if (rlhfInterface) rlhfInterface.updateTargetComparisons();
+        }
+        
+        function downloadFeedbackData() {
+            if (rlhfInterface) rlhfInterface.downloadFeedbackData();
+        }
+        
+        function downloadPreferredImages() {
+            if (rlhfInterface) rlhfInterface.downloadPreferredImages();
+        }
+        
+        function startNewSession() {
+            if (rlhfInterface) rlhfInterface.startNewSessionConfirm();
+        }
+        
+        function resetView(side) {
+            if (rlhfInterface) rlhfInterface.resetView(side);
+        }
+        
+        function toggleWireframe(side) {
+            if (rlhfInterface) rlhfInterface.toggleWireframe(side);
+        }
+        
+        function captureView(side) {
+            if (rlhfInterface) rlhfInterface.captureView(side);
+        }
+        
+        function refreshData() {
+            if (rlhfInterface && !rlhfInterface.currentSession.isComplete) {
+                rlhfInterface.loadNextComparison();
             }
         }
-        // 최종 수정된 스크립트 - 전체 스크립트를 이 내용으로 교체하세요
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('RLHF 인터페이스 초기화...');
-            
-            // 기본 요소들
-            const designList = document.getElementById('design-list');
-            const viewerContainer = document.getElementById('viewer-container');
-            const viewerTitle = document.getElementById('viewer-title');
-            const designInfo = document.getElementById('design-info');
-            const feedbackForm = document.getElementById('feedback-form');
-            const submitButton = document.getElementById('btn-submit-feedback');
-            const zmqStatusEl = document.getElementById('zmq-status');
-            
-            // 전역 변수들
-            window.currentDesignId = null;
-            let scene, camera, renderer, controls;
-            
-            // ZMQ 상태 메시지 비활성화
-            if (zmqStatusEl) {
-                zmqStatusEl.innerHTML = '서버 연결됨';
-                zmqStatusEl.classList.remove('text-danger', 'text-warning');
-                zmqStatusEl.classList.add('text-success');
-            }
-            
-            // API 요청 에러 메시지 숨기기
-            window.addEventListener('error', function(event) {
-                if (event.message && (event.message.includes('api/zmq/ping') || event.message.includes('ZMQ'))) {
-                    console.log('ZMQ 관련 오류 무시됨');
-                    event.preventDefault();
-                }
-            });
-            
-            // Three.js 라이브러리 로드 확인
-            function checkThreeJsLoaded() {
-                if (typeof THREE === 'undefined') {
-                    console.error('Three.js 라이브러리가 로드되지 않았습니다!');
-                    
-                    // 뷰어 컨테이너에 오류 메시지 표시
-                    if (viewerContainer) {
-                        viewerContainer.innerHTML = `
-                            <div class="d-flex justify-content-center align-items-center h-100 text-light">
-                                <div class="text-center">
-                                    <i class="fa-solid fa-triangle-exclamation fs-1 mb-3"></i>
-                                    <p>Three.js 라이브러리를 로드할 수 없습니다.</p>
-                                    <p class="small">브라우저 콘솔을 확인해 주세요.</p>
-                                </div>
-                            </div>
-                        `;
-                    }
-                    return false;
-                }
-                return true;
-            }
-            
-            // 선택 디자인 처리 함수 수정 - NaN 값 처리
-            window.selectDesign = async function(designId) {
-                console.log('디자인 선택:', designId);
-                
-                // 현재 선택된 디자인 ID 업데이트
-                window.currentDesignId = designId;
-                
-                // 이전 선택 디자인 비활성화
-                document.querySelectorAll('.design-item').forEach(el => {
-                    el.classList.remove('active');
-                });
-                
-                // 현재 디자인 활성화
-                const selectedItem = document.querySelector(`.design-item[data-design-id="${designId}"]`);
-                if (selectedItem) {
-                    selectedItem.classList.add('active');
-                    selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }
-                
-                // 비주얼 피드백 - 선택한 디자인 타이틀 업데이트
-                if (viewerTitle) {
-                    viewerTitle.textContent = `디자인 ${designId.split('_')[0]}`;
-                }
-                
-                // 디자인 상세 정보 가져오기
-                try {
-                    const response = await fetch(`/api/designs/${designId}`);
-                    let data;
-                    
-                    try {
-                        // JSON 파싱 시도
-                        data = await response.json();
-                    } catch (jsonError) {
-                        console.error('JSON 파싱 오류:', jsonError);
-                        
-                        // 텍스트로 응답 다시 가져오기
-                        const textResponse = await response.text();
-                        console.log('원본 응답 텍스트:', textResponse);
-                        
-                        // NaN 값을 null로 변환하여 다시 파싱 시도
-                        const cleanedText = textResponse.replace(/NaN/g, 'null');
-                        try {
-                            data = JSON.parse(cleanedText);
-                            console.log('NaN 처리 후 파싱 성공');
-                        } catch (secondError) {
-                            console.error('두 번째 파싱 시도도 실패:', secondError);
-                            throw jsonError; // 원래 오류 다시 발생
-                        }
-                    }
-                    
-                    if (data.status === 'success' && data.design) {
-                        const design = data.design;
-                        
-                        // 디자인 정보 표시
-                        if (designInfo) {
-                            // 기본 정보 형식화
-                            const timestamp = design.timestamp ? new Date(design.timestamp) : new Date();
-                            const dateString = timestamp.toLocaleString();
-                            
-                            // 상태 값 가져오기 (NaN 값 처리)
-                            const state = design.state || [];
-                            
-                            // 액션 값 가져오기 (NaN 값 처리)
-                            const action = design.action || [];
-                            
-                            // HTML 구성
-                            let html = '<table class="design-info-table table-sm">';
-                            
-                            // ID 및 날짜
-                            html += `<tr><td>디자인 ID:</td><td>${design.id}</td></tr>`;
-                            html += `<tr><td>생성 시간:</td><td>${dateString}</td></tr>`;
-                            
-                            // 보상 값 (NaN 처리)
-                            const reward = (design.reward !== null && !isNaN(design.reward)) 
-                                ? parseFloat(design.reward).toFixed(4) 
-                                : 'N/A';
-                            html += `<tr><td>보상 값:</td><td><span class="badge bg-info">${reward}</span></td></tr>`;
-                            
-                            // 상태 및 액션 값
-                            html += `<tr><td colspan="2" class="pt-2"><strong>상태 값:</strong></td></tr>`;
-                            state.forEach((value, index) => {
-                                const formattedValue = (value !== null && !isNaN(value)) 
-                                    ? parseFloat(value).toFixed(4) 
-                                    : 'N/A';
-                                html += `<tr><td>상태 ${index + 1}:</td><td>${formattedValue}</td></tr>`;
-                            });
-                            
-                            html += `<tr><td colspan="2" class="pt-2"><strong>액션 값:</strong></td></tr>`;
-                            action.forEach((value, index) => {
-                                const formattedValue = (value !== null && !isNaN(value)) 
-                                    ? parseFloat(value).toFixed(4) 
-                                    : 'N/A';
-                                html += `<tr><td>액션 ${index + 1}:</td><td>${formattedValue}</td></tr>`;
-                            });
-                            
-                            html += '</table>';
-                            
-                            // 컨테이너에 삽입
-                            designInfo.innerHTML = html;
-                        }
-                        
-                        // 3D 뷰어에 메쉬 로드
-                        loadMesh(designId);
-                        
-                        // 피드백 폼 활성화
-                        if (submitButton) {
-                            submitButton.disabled = false;
-                        }
-                    }
-                } catch (error) {
-                    console.error('디자인 정보 로드 오류:', error);
-                    
-                    // 기본 정보만 표시
-                    if (designInfo) {
-                        designInfo.innerHTML = `
-                            <div class="alert alert-warning">
-                                <i class="fa-solid fa-exclamation-triangle me-2"></i>
-                                디자인 정보를 불러오는 중 오류가 발생했습니다.
-                            </div>
-                            <p>선택된 디자인: ${designId}</p>
-                        `;
-                    }
-                }
-            };
-
-            // 디자인 목록 로드 함수에도 NaN 값 처리 추가
-            async function loadDesigns() {
-                if (!designList) return;
-                
-                try {
-                    // 로딩 표시
-                    designList.innerHTML = `
-                        <div class="list-group-item text-center py-5">
-                            <div class="spinner-border text-primary mb-2" role="status">
-                                <span class="visually-hidden">로딩 중...</span>
-                            </div>
-                            <p class="mb-0">디자인 목록을 불러오는 중...</p>
-                        </div>
-                    `;
-                    
-                    // API에서 디자인 가져오기
-                    const response = await fetch('/api/designs');
-                    let data;
-                    
-                    try {
-                        // JSON 파싱 시도
-                        data = await response.json();
-                    } catch (jsonError) {
-                        console.error('JSON 파싱 오류:', jsonError);
-                        
-                        // 텍스트로 응답 다시 가져오기
-                        const textResponse = await response.text();
-                        
-                        // NaN 값을 null로 변환하여 다시 파싱 시도
-                        const cleanedText = textResponse.replace(/NaN/g, 'null');
-                        try {
-                            data = JSON.parse(cleanedText);
-                            console.log('NaN 처리 후 파싱 성공');
-                        } catch (secondError) {
-                            console.error('두 번째 파싱 시도도 실패:', secondError);
-                            throw jsonError; // 원래 오류 다시 발생
-                        }
-                    }
-                    
-                    if (data.status === 'success' && data.designs && data.designs.length > 0) {
-                        // 디자인 목록 HTML 생성
-                        let html = '';
-                        
-                        data.designs.forEach(design => {
-                            const designId = design.id || 'unknown';
-                            // NaN 값 처리
-                            const reward = (design.reward !== null && !isNaN(design.reward)) 
-                                ? parseFloat(design.reward).toFixed(4) 
-                                : 'N/A';
-                            const timestamp = design.timestamp ? new Date(design.timestamp).toLocaleString() : 'N/A';
-                            
-                            // 액션 값 가져오기 (NaN 값 처리)
-                            const action = design.action || [];
-                            const actionStr = action.length > 0 
-                                ? action.map(val => {
-                                    return (val !== null && !isNaN(val)) 
-                                        ? parseFloat(val).toFixed(2) 
-                                        : 'N/A';
-                                }).join(', ')
-                                : 'N/A';
-                            
-                            html += `
-                                <div class="list-group-item design-item" data-design-id="${designId}">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <div class="design-item-title">${designId.split('_')[0]}</div>
-                                            <div class="small">액션: ${actionStr}</div>
-                                            <div class="design-item-date">${timestamp}</div>
-                                        </div>
-                                        <div class="design-item-reward">${reward}</div>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        
-                        // 목록에 HTML 삽입
-                        designList.innerHTML = html;
-                        
-                        // 클릭 이벤트 리스너 추가
-                        document.querySelectorAll('.design-item').forEach(item => {
-                            item.addEventListener('click', function() {
-                                const id = this.dataset.designId;
-                                window.selectDesign(id);
-                            });
-                        });
-                        
-                        // 첫 번째 디자인 자동 선택
-                        if (data.designs.length > 0) {
-                            window.selectDesign(data.designs[0].id);
-                        }
-                    } else {
-                        // 디자인이 없는 경우
-                        designList.innerHTML = `
-                            <div class="list-group-item text-center py-5">
-                                <i class="fa-solid fa-info-circle mb-2 fs-4 text-info"></i>
-                                <p class="mb-0">디자인 데이터가 없습니다.</p>
-                                <p class="small text-muted mt-2">디자인 데이터를 생성하거나 RLHF 기준 데이터를 가져오세요.</p>
-                            </div>
-                        `;
-                    }
-                } catch (error) {
-                    console.error('디자인 로드 중 오류:', error);
-                    
-                    // 오류 메시지 표시
-                    designList.innerHTML = `
-                        <div class="list-group-item text-center py-5">
-                            <div class="alert alert-danger mb-0">
-                                <i class="fa-solid fa-exclamation-circle me-1"></i>
-                                오류: 디자인 목록을 불러올 수 없습니다.
-                            </div>
-                            <p class="small text-muted mt-2">콘솔을 확인하세요: ${error.message}</p>
-                        </div>
-                    `;
-                }
-            }
-            
-            // 3D 뷰어 정리
-            function cleanup3dViewer() {
-                console.log('3D 뷰어 리소스 정리 중...');
-                
-                // 이전에 렌더러가 있었다면 정리
-                if (renderer) {
-                    renderer.dispose();
-                    // DOM에서 제거
-                    if (viewerContainer && renderer.domElement && renderer.domElement.parentNode === viewerContainer) {
-                        viewerContainer.removeChild(renderer.domElement);
-                    }
-                }
-                
-                // 리사이즈 이벤트 리스너 제거
-                window.removeEventListener('resize', handleResize);
-                
-                // 메모리 정리를 위해 참조 제거
-                if (scene) {
-                    disposeScene(scene);
-                }
-                
-                scene = null;
-                camera = null;
-                renderer = null;
-                controls = null;
-                
-                console.log('3D 뷰어 리소스 정리 완료');
-            }
-            
-            // 장면 내 리소스 정리
-            function disposeScene(scene) {
-                scene.traverse((object) => {
-                    if (object.geometry) {
-                        object.geometry.dispose();
-                    }
-                    
-                    if (object.material) {
-                        if (Array.isArray(object.material)) {
-                            object.material.forEach(material => disposeMaterial(material));
-                        } else {
-                            disposeMaterial(object.material);
-                        }
-                    }
-                });
-            }
-            
-            // 재질 정리
-            function disposeMaterial(material) {
-                // 재질의 모든 텍스처 정리
-                for (const key in material) {
-                    const value = material[key];
-                    if (value && typeof value === 'object' && 'dispose' in value) {
-                        value.dispose();
-                    }
-                }
-                material.dispose();
-            }
-            
-            // 1. 자동 줌 기능 개선 (ZEA 효과)
-            function fitCameraToMeshes(meshes, camera, controls, fitOffset = 1.2) {
-                if (!meshes || meshes.length === 0 || !camera || !controls) {
-                    console.warn('fitCameraToMeshes: 유효한 매개변수가 없습니다');
-                    return false;
-                }
-
-                try {
-                    // 모든 메쉬를 포함하는 경계 상자 생성
-                    const box = new THREE.Box3();
-                    
-                    // 모든 메쉬의 경계 상자 계산
-                    meshes.forEach(mesh => {
-                        mesh.geometry.computeBoundingBox();
-                        box.expandByObject(mesh);
-                    });
-                    
-                    // 경계 상자가 유효하지 않으면 종료
-                    if (box.isEmpty() || !isFinite(box.min.x) || !isFinite(box.max.x)) {
-                        console.warn('fitCameraToMeshes: 유효하지 않은 경계 상자');
-                        return false;
-                    }
-                    
-                    // 경계 상자 중심과 크기 계산
-                    const center = new THREE.Vector3();
-                    box.getCenter(center);
-                    
-                    const size = new THREE.Vector3();
-                    box.getSize(size);
-                    
-                    // 가장 큰 차원 찾기
-                    const maxDim = Math.max(size.x, size.y, size.z);
-                    const fov = camera.fov * (Math.PI / 180);
-                    
-                    // 최적 거리 계산 (더 가까이 보이도록 조정)
-                    let cameraDistance = Math.abs((maxDim / 2) / Math.tan(fov / 2)) * fitOffset;
-                    
-                    // 더 가까운 거리에서 보기 위해 거리 조정 (0.8 배율 적용)
-                    cameraDistance *= 0.8;
-                    
-                    // 카메라 위치 계산 (약간 각도 조정)
-                    const direction = new THREE.Vector3(1, 0.8, 1).normalize();
-                    camera.position.copy(center).add(direction.multiplyScalar(cameraDistance));
-                    
-                    // 카메라가 중심을 바라보도록 설정
-                    camera.lookAt(center);
-                    
-                    // 컨트롤의 타겟을 중심으로 설정
-                    controls.target.copy(center);
-                    controls.update();
-                    
-                    console.log('카메라 자동 줌 적용됨 (ZEA 효과)');
-                    return true;
-                } catch (error) {
-                    console.error('fitCameraToMeshes 오류:', error);
-                    return false;
-                }
-            }
-
-            // 2. Three.js 뷰어 초기화 함수 수정 (자동 줌 적용)
-            function initThreeViewer(meshData) {
-                try {
-                    console.log('Three.js 뷰어 초기화 시작');
-                    
-                    if (!viewerContainer) {
-                        console.error('뷰어 컨테이너 요소를 찾을 수 없습니다!');
-                        return;
-                    }
-                    
-                    // 기존 콘텐츠 및 Three.js 요소 정리
-                    cleanup3dViewer();
-                    
-                    // 기존 콘텐츠 제거
-                    viewerContainer.innerHTML = '';
-                    
-                    // 뷰어 초기화 로직
-                    scene = new THREE.Scene();
-                    scene.background = new THREE.Color(0x2c3e50);
-                    
-                    const width = viewerContainer.clientWidth || 400; // 기본값 설정
-                    const height = viewerContainer.clientHeight || 300; // 기본값 설정
-                    
-                    console.log(`뷰어 크기: ${width}x${height}`);
-                    
-                    camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-                    camera.position.set(5, 5, 5);
-                    camera.lookAt(0, 0, 0);
-                    
-                    // 렌더러 생성
-                    renderer = new THREE.WebGLRenderer({ antialias: true });
-                    renderer.setSize(width, height);
-                    renderer.setPixelRatio(window.devicePixelRatio);
-                    renderer.shadowMap.enabled = true;
-                    
-                    // 렌더러를 컨테이너에 추가
-                    viewerContainer.appendChild(renderer.domElement);
-                    
-                    // 오류 확인
-                    if (!viewerContainer.contains(renderer.domElement)) {
-                        console.error('렌더러 요소가 DOM에 추가되지 않았습니다!');
-                    }
-                    
-                    // 컨트롤 생성
-                    controls = new THREE.OrbitControls(camera, renderer.domElement);
-                    controls.enableDamping = true;
-                    controls.dampingFactor = 0.05;
-                    
-                    // 조명 추가
-                    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-                    scene.add(ambientLight);
-                    
-                    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-                    directionalLight.position.set(5, 10, 7);
-                    directionalLight.castShadow = true;
-                    scene.add(directionalLight);
-                    
-                    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-                    fillLight.position.set(-5, 5, -5);
-                    scene.add(fillLight);
-                    
-                    // 그리드 헬퍼
-                    const gridHelper = new THREE.GridHelper(20, 20, 0x555555, 0x333333);
-                    scene.add(gridHelper);
-                    
-                    // 축 헬퍼
-                    const axesHelper = new THREE.AxesHelper(2);
-                    scene.add(axesHelper);
-                    
-                    console.log('기본 장면 설정 완료');
-                    
-                    // 메쉬 데이터 로드
-                    let meshesLoaded = 0;
-                    const meshes = [];
-                    
-                    if (meshData && meshData.meshes && Array.isArray(meshData.meshes)) {
-                        console.log(`로드할 메쉬 수: ${meshData.meshes.length}`);
-                        
-                        meshData.meshes.forEach((meshInfo, index) => {
-                            console.log(`메쉬 ${index + 1} 처리 중...`);
-                            if (!meshInfo.vertices || !meshInfo.faces) {
-                                console.warn(`메쉬 ${index + 1}에 정점 또는 면 데이터가 없습니다.`);
-                                return;
-                            }
-                            
-                            try {
-                                // 지오메트리 생성
-                                const geometry = new THREE.BufferGeometry();
-                                
-                                // 정점 설정
-                                const vertices = [];
-                                for (let i = 0; i < meshInfo.vertices.length; i++) {
-                                    const vertex = meshInfo.vertices[i];
-                                    vertices.push(vertex[0], vertex[1], vertex[2]);
-                                }
-                                
-                                console.log(`정점 수: ${meshInfo.vertices.length}`);
-                                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-                                
-                                // 인덱스 설정
-                                const indices = [];
-                                for (let i = 0; i < meshInfo.faces.length; i++) {
-                                    const face = meshInfo.faces[i];
-                                    if (face.length === 3) {
-                                        indices.push(face[0], face[1], face[2]);
-                                    } else if (face.length === 4) {
-                                        // 쿼드를 두 개의 삼각형으로 변환
-                                        indices.push(face[0], face[1], face[2]);
-                                        indices.push(face[0], face[2], face[3]);
-                                    }
-                                }
-                                
-                                console.log(`면 수: ${meshInfo.faces.length}`);
-                                
-                                if (indices.length > 0) {
-                                    geometry.setIndex(indices);
-                                }
-                                
-                                // 법선 설정
-                                if (meshInfo.normals && meshInfo.normals.length > 0) {
-                                    const normals = [];
-                                    for (let i = 0; i < meshInfo.normals.length; i++) {
-                                        const normal = meshInfo.normals[i];
-                                        normals.push(normal[0], normal[1], normal[2]);
-                                    }
-                                    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-                                    console.log(`법선 수: ${meshInfo.normals.length}`);
-                                } else {
-                                    console.log('법선 자동 계산 중...');
-                                    geometry.computeVertexNormals();
-                                }
-                                
-                                // 메쉬 위치를 중심에 맞추기 위해 바운딩 박스 계산
-                                geometry.computeBoundingBox();
-                                
-                                // 재질 생성
-                                const material = new THREE.MeshPhongMaterial({
-                                    color: 0x3498db,
-                                    specular: 0x111111,
-                                    shininess: 30,
-                                    flatShading: false,
-                                    side: THREE.DoubleSide
-                                });
-                                
-                                // 메쉬 생성 및 추가
-                                const mesh = new THREE.Mesh(geometry, material);
-                                mesh.castShadow = true;
-                                mesh.receiveShadow = true;
-                                scene.add(mesh);
-                                meshes.push(mesh);
-                                meshesLoaded++;
-                            } catch (meshError) {
-                                console.error(`메쉬 ${index + 1} 처리 중 오류:`, meshError);
-                            }
-                        });
-                        
-                        console.log(`${meshesLoaded}개 메쉬 로드 완료`);
-                        
-                        // 자동 줌 적용 (ZEA 효과)
-                        if (meshes.length > 0) {
-                            // 약간의 지연 후 자동 줌 적용 (메쉬가 완전히 로드된 후)
-                            setTimeout(() => {
-                                const success = fitCameraToMeshes(meshes, camera, controls);
-                                if (success) {
-                                    console.log('자동 줌 적용 성공 (ZEA 효과)');
-                                } else {
-                                    console.warn('자동 줌 적용 실패, 기본 카메라 위치 사용');
-                                }
-                            }, 100);
-                        } else {
-                            // 메쉬가 없는 경우 기본 큐브 추가 (테스트용)
-                            console.log('메쉬를 로드할 수 없습니다. 기본 큐브 생성 중...');
-                            const geometry = new THREE.BoxGeometry(1, 1, 1);
-                            const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
-                            const cube = new THREE.Mesh(geometry, material);
-                            scene.add(cube);
-                            meshes.push(cube);
-                            
-                            // 기본 큐브에도 자동 줌 적용
-                            setTimeout(() => {
-                                fitCameraToMeshes(meshes, camera, controls);
-                            }, 100);
-                        }
-                    } else {
-                        console.warn('유효한 메쉬 데이터가 없습니다. 기본 큐브 생성 중...');
-                        // 기본 큐브 추가 (테스트용)
-                        const geometry = new THREE.BoxGeometry(1, 1, 1);
-                        const material = new THREE.MeshPhongMaterial({ color: 0x3498db });
-                        const cube = new THREE.Mesh(geometry, material);
-                        scene.add(cube);
-                        meshes.push(cube);
-                        
-                        // 기본 큐브에도 자동 줌 적용
-                        setTimeout(() => {
-                            fitCameraToMeshes(meshes, camera, controls);
-                        }, 100);
-                    }
-                    
-                    // 화면 크기 변경 이벤트 리스너
-                    window.addEventListener('resize', handleResize);
-                    
-                    // 애니메이션 루프 시작
-                    animate();
-                    
-                    // 버튼 이벤트 리스너 설정
-                    setupButtonListeners();
-                    
-                    console.log('Three.js 뷰어 초기화 완료');
-                } catch (error) {
-                    console.error('Three.js 초기화 오류:', error);
-                    
-                    if (viewerContainer) {
-                        viewerContainer.innerHTML = `
-                            <div class="d-flex justify-content-center align-items-center h-100">
-                                <div class="text-center text-light">
-                                    <i class="fa-solid fa-bug fs-1 mb-3"></i>
-                                    <p>3D 뷰어 초기화 오류</p>
-                                    <p class="small">${error.message}</p>
-                                </div>
-                            </div>
-                        `;
-                    }
-                }
-            }
-
-            // 3. 뷰 리셋 버튼 핸들러 업데이트
-            function setupButtonListeners() {
-                // 와이어프레임 전환 버튼
-                const wireframeButton = document.getElementById('btn-wireframe');
-                if (wireframeButton) {
-                    wireframeButton.addEventListener('click', function() {
-                        if (!scene) return;
-                        
-                        scene.traverse(object => {
-                            if (object instanceof THREE.Mesh) {
-                                object.material.wireframe = !object.material.wireframe;
-                            }
-                        });
-                        
-                        this.classList.toggle('active');
-                    });
-                }
-                
-                // 뷰 리셋 버튼 - 자동 줌 적용
-                const resetButton = document.getElementById('btn-reset-view');
-                if (resetButton) {
-                    resetButton.addEventListener('click', function() {
-                        if (!camera || !controls || !scene) return;
-                        
-                        // 씬에서 메쉬 목록 가져오기
-                        const meshes = [];
-                        scene.traverse((object) => {
-                            if (object instanceof THREE.Mesh) {
-                                meshes.push(object);
-                            }
-                        });
-                        
-                        // 자동 줌 적용 (ZEA 효과)
-                        if (meshes.length > 0) {
-                            fitCameraToMeshes(meshes, camera, controls);
-                        } else {
-                            // 메쉬가 없으면 기본 위치로
-                            camera.position.set(5, 5, 5);
-                            camera.lookAt(0, 0, 0);
-                            controls.target.set(0, 0, 0);
-                            controls.update();
-                        }
-                    });
-                }
-                
-                // 스크린샷 버튼
-                const screenshotButton = document.getElementById('btn-screenshot');
-                if (screenshotButton) {
-                    screenshotButton.addEventListener('click', function() {
-                        if (!renderer) return;
-                        
-                        const dataUrl = renderer.domElement.toDataURL('image/png');
-                        
-                        // 스크린샷 표시
-                        const container = document.createElement('div');
-                        container.className = 'screenshot-container';
-                        
-                        const img = document.createElement('img');
-                        img.src = dataUrl;
-                        img.className = 'screenshot-image';
-                        
-                        const controls = document.createElement('div');
-                        controls.className = 'screenshot-controls';
-                        
-                        const closeButton = document.createElement('button');
-                        closeButton.className = 'btn btn-light me-2';
-                        closeButton.innerHTML = '<i class="fa-solid fa-times"></i>';
-                        closeButton.addEventListener('click', () => {
-                            document.body.removeChild(container);
-                        });
-                        
-                        const downloadButton = document.createElement('button');
-                        downloadButton.className = 'btn btn-primary';
-                        downloadButton.innerHTML = '<i class="fa-solid fa-download me-1"></i> 다운로드';
-                        downloadButton.addEventListener('click', () => {
-                            const link = document.createElement('a');
-                            link.href = dataUrl;
-                            link.download = `design-${window.currentDesignId || 'screenshot'}.png`;
-                            link.click();
-                        });
-                        
-                        controls.appendChild(closeButton);
-                        controls.appendChild(downloadButton);
-                        
-                        container.appendChild(img);
-                        container.appendChild(controls);
-                        document.body.appendChild(container);
-                    });
-                }
-            }
-            
-            // 애니메이션 루프
-            function animate() {
-                if (!scene || !camera || !renderer) return;
-                
-                requestAnimationFrame(animate);
-                
-                // 컨트롤 업데이트
-                if (controls) {
-                    controls.update();
-                }
-                
-                // 렌더링
-                renderer.render(scene, camera);
-            }
-            
-            // 피드백 폼 처리
-            if (feedbackForm) {
-                // 슬라이더 값 표시 업데이트
-                document.querySelectorAll('input[type="range"]').forEach(slider => {
-                    const valueId = slider.id + '-value';
-                    const valueElement = document.getElementById(valueId);
-                    
-                    if (valueElement) {
-                        slider.addEventListener('input', function() {
-                            valueElement.textContent = parseFloat(this.value).toFixed(1);
-                        });
-                    }
-                });
-                
-                // 폼 제출 이벤트
-                feedbackForm.addEventListener('submit', async function(event) {
-                    event.preventDefault();
-                    
-                    // 선택된 디자인 확인
-                    if (!window.currentDesignId) {
-                        alert('피드백을 제출할 디자인이 선택되지 않았습니다.');
-                        return;
-                    }
-                    
-                    // 제출 버튼 비활성화
-                    if (submitButton) {
-                        submitButton.disabled = true;
-                        submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span> 제출 중...';
-                    }
-                    
-                    try {
-                        // 평가 데이터 수집
-                        const ratings = {};
-                        const sliders = {
-                            aesthetic: document.getElementById('rating-aesthetic'),
-                            functionality: document.getElementById('rating-functionality'),
-                            innovation: document.getElementById('rating-innovation'),
-                            feasibility: document.getElementById('rating-feasibility'),
-                            overall: document.getElementById('rating-overall')
-                        };
-                        
-                        for (const key in sliders) {
-                            if (sliders[key]) {
-                                ratings[key] = parseFloat(sliders[key].value);
-                            }
-                        }
-                        
-                        // 코멘트 가져오기
-                        const commentInput = document.getElementById('feedback-comment');
-                        const comment = commentInput ? commentInput.value.trim() : '';
-                        
-                        // 제출 데이터 구성
-                        const feedbackData = {
-                            design_id: window.currentDesignId,
-                            ratings: ratings,
-                            comment: comment
-                        };
-                        
-                        console.log('피드백 데이터 제출:', feedbackData);
-                        
-                        // API 호출
-                        const response = await fetch('/api/feedback', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(feedbackData)
-                        });
-                        
-                        const data = await response.json();
-                        
-                        // 제출 버튼 원래대로 복원
-                        if (submitButton) {
-                            submitButton.disabled = false;
-                            submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
-                        }
-                        
-                        if (data.status === 'success') {
-                            console.log('피드백 제출 성공:', data);
-                            
-                            // 성공 메시지 표시
-                            const feedbackModal = new bootstrap.Modal(document.getElementById('feedbackModal'));
-                            feedbackModal.show();
-                            
-                            // 폼 리셋
-                            for (const key in sliders) {
-                                if (sliders[key]) {
-                                    sliders[key].value = 5;
-                                    const valueLabel = document.getElementById(`rating-${key}-value`);
-                                    if (valueLabel) {
-                                        valueLabel.textContent = '5.0';
-                                    }
-                                }
-                            }
-                            
-                            if (commentInput) {
-                                commentInput.value = '';
-                            }
-                        } else {
-                            console.error('피드백 제출 실패:', data);
-                            alert('피드백 제출 실패: ' + (data.message || '알 수 없는 오류'));
-                        }
-                    } catch (error) {
-                        console.error('피드백 제출 중 오류:', error);
-                        
-                        // 제출 버튼 원래대로 복원
-                        if (submitButton) {
-                            submitButton.disabled = false;
-                            submitButton.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i> 피드백 제출';
-                        }
-                        
-                        alert('피드백 제출 중 오류가 발생했습니다: ' + error.message);
-                    }
-                });
-            }
-            
-            // 다음 디자인 버튼 이벤트 리스너
-            const nextDesignButton = document.getElementById('btn-next-design');
-            if (nextDesignButton) {
-                nextDesignButton.addEventListener('click', function() {
-                    // 모달 닫기
-                    const modal = bootstrap.Modal.getInstance(document.getElementById('feedbackModal'));
-                    if (modal) {
-                        modal.hide();
-                    }
-                    
-                    // 다음 디자인 선택
-                    if (window.currentDesignId) {
-                        const designItems = document.querySelectorAll('.design-item');
-                        const designIds = Array.from(designItems).map(item => item.dataset.designId);
-                        const currentIndex = designIds.indexOf(window.currentDesignId);
-                        
-                        if (currentIndex !== -1 && designIds.length > 1) {
-                            const nextIndex = (currentIndex + 1) % designIds.length;
-                            const nextDesignId = designIds[nextIndex];
-                            
-                            // 다음 디자인 선택
-                            window.selectDesign(nextDesignId);
-                        }
-                    }
-                });
-            }
-            
-            // 디자인 목록 로드
-            async function loadDesigns() {
-                if (!designList) return;
-                
-                try {
-                    // 로딩 표시
-                    designList.innerHTML = `
-                        <div class="list-group-item text-center py-5">
-                            <div class="spinner-border text-primary mb-2" role="status">
-                                <span class="visually-hidden">로딩 중...</span>
-                            </div>
-                            <p class="mb-0">디자인 목록을 불러오는 중...</p>
-                        </div>
-                    `;
-                    
-                    // API에서 디자인 가져오기
-                    const response = await fetch('/api/designs');
-                    const data = await response.json();
-                    
-                    if (data.status === 'success' && data.designs && data.designs.length > 0) {
-                        // 디자인 목록 HTML 생성
-                        let html = '';
-                        
-                        data.designs.forEach(design => {
-                            const designId = design.id || 'unknown';
-                            const reward = design.reward !== null ? parseFloat(design.reward).toFixed(4) : 'N/A';
-                            const timestamp = design.timestamp ? new Date(design.timestamp).toLocaleString() : 'N/A';
-                            
-                            // 액션 값 가져오기
-                            const action = design.action || [];
-                            const actionStr = action.length > 0 
-                                ? action.map(val => (val !== null ? parseFloat(val).toFixed(2) : 'N/A')).join(', ')
-                                : 'N/A';
-                            
-                            html += `
-                                <div class="list-group-item design-item" data-design-id="${designId}">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <div class="design-item-title">${designId.split('_')[0]}</div>
-                                            <div class="small">액션: ${actionStr}</div>
-                                            <div class="design-item-date">${timestamp}</div>
-                                        </div>
-                                        <div class="design-item-reward">${reward}</div>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        
-                        // 목록에 HTML 삽입
-                        designList.innerHTML = html;
-                        
-                        // 클릭 이벤트 리스너 추가
-                        document.querySelectorAll('.design-item').forEach(item => {
-                            item.addEventListener('click', function() {
-                                const id = this.dataset.designId;
-                                window.selectDesign(id);
-                            });
-                        });
-                        
-                        // 첫 번째 디자인 자동 선택
-                        if (data.designs.length > 0) {
-                            window.selectDesign(data.designs[0].id);
-                        }
-                    } else {
-                        // 디자인이 없는 경우
-                        designList.innerHTML = `
-                            <div class="list-group-item text-center py-5">
-                                <i class="fa-solid fa-info-circle mb-2 fs-4 text-info"></i>
-                                <p class="mb-0">디자인 데이터가 없습니다.</p>
-                                <p class="small text-muted mt-2">디자인 데이터를 생성하거나 RLHF 기준 데이터를 가져오세요.</p>
-                            </div>
-                        `;
-                    }
-                } catch (error) {
-                    console.error('디자인 로드 중 오류:', error);
-                    
-                    // 오류 메시지 표시
-                    designList.innerHTML = `
-                        <div class="list-group-item text-center py-5">
-                            <div class="alert alert-danger mb-0">
-                                <i class="fa-solid fa-exclamation-circle me-1"></i>
-                                오류: 디자인 목록을 불러올 수 없습니다.
-                            </div>
-                            <p class="small text-muted mt-2">콘솔을 확인하세요: ${error.message}</p>
-                        </div>
-                    `;
-                }
-            }
-            
-            // 새로고침 버튼
-            const refreshButton = document.getElementById('btn-refresh');
-            if (refreshButton) {
-                refreshButton.addEventListener('click', () => {
-                    loadDesigns();
-                });
-            }
-            
-            // 초기 디자인 목록 로드
-            loadDesigns();
+        
+        // DOM 로드 완료 시 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            rlhfInterface = new RLHFInterface();
         });
     </script>
 </body>
