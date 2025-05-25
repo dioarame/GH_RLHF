@@ -1,44 +1,41 @@
-function showNotification(message, type = 'info') {
-        // 간단한 알림 표시
-        const notification = document.createElement('div');
-        notification.className = `alert alert-${type === 'success' ? 'success' : 'info'} alert-dismissible`;
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 9999;
-            min-width: 300px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        `;
-        
-        notification.innerHTML = `
-            ${message}
-            <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
-        `;
-        
-        document.body.appendChild(notification);
-        
-        // 페이드 인 효과
-        setTimeout(() => {
-            notification.style.opacity = '1';
-        }, 100);
-        
-        // 3초 후 자동 제거
-        setTimeout(() => {
-            if (notification.parentElement) {
-                notification.style.opacity = '0';
-                setTimeout(() => notification.remove(), 300);
-            }
-        }, 3000);
-    }
-
-// DOM 로드 완료 시 초기화
-document.addEventListener('DOMContentLoaded', () => {
-    rlhfSystem = new RLHFSystem();
-});/**
+/**
  * RLHF 인간 피드백 시스템 - 메인 애플리케이션
  */
+
+function showNotification(message, type = 'info') {
+    // 간단한 알림 표시
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${type === 'success' ? 'success' : 'info'} alert-dismissible`;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 9999;
+        min-width: 300px;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    `;
+    
+    notification.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    // 페이드 인 효과
+    setTimeout(() => {
+        notification.style.opacity = '1';
+    }, 100);
+    
+    // 3초 후 자동 제거
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.style.opacity = '0';
+            setTimeout(() => notification.remove(), 300);
+        }
+    }, 3000);
+}
 
 class RLHFSystem {
     constructor() {
@@ -47,6 +44,11 @@ class RLHFSystem {
         this.cameras = { a: null, b: null };
         this.renderers = { a: null, b: null };
         this.controls = { a: null, b: null };
+        this.environmentData = { contour: null, surface: null }; // 환경 데이터
+        this.viewerMode = { a: 'light', b: 'light' }; // 뷰어 모드 (light/dark)
+        this.systemTheme = 'light'; // 시스템 전체 테마
+        this.selectionHistory = []; // 사용자 선택 히스토리
+        this.designStats = null; // 디자인 통계 정보
         this.sessionStats = { 
             total_comparisons: 0, 
             target_comparisons: 100 
@@ -59,11 +61,278 @@ class RLHFSystem {
         console.log('RLHF 시스템 초기화 중...');
         
         try {
+            // 환경 데이터 로드
+            await this.loadEnvironmentData();
             this.initViewers();
-            await this.loadNextComparison();
+            
+            // 목표 설정 모달 표시
+            await this.showTargetSetupModal();
+            
             console.log('초기화 완료');
         } catch (error) {
             console.error('초기화 오류:', error);
+        }
+    }
+    
+    async showTargetSetupModal() {
+        try {
+            // Bootstrap 모달 표시 (안전하게)
+            const modalElement = document.getElementById('targetSetupModal');
+            
+            if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                const modal = new bootstrap.Modal(modalElement);
+                modal.show();
+            } else {
+                // Bootstrap이 없으면 수동으로 표시
+                modalElement.style.display = 'block';
+                modalElement.classList.add('show');
+                document.body.classList.add('modal-open');
+                
+                // 배경 오버레이 추가
+                const backdrop = document.createElement('div');
+                backdrop.className = 'modal-backdrop fade show';
+                document.body.appendChild(backdrop);
+            }
+            
+            // 디자인 분석 수행
+            await this.analyzeDesigns();
+        } catch (error) {
+            console.error('모달 표시 오류:', error);
+            // 모달 없이도 분석 진행
+            await this.analyzeDesigns();
+        }
+    }
+    
+    async analyzeDesigns() {
+        try {
+            console.log('디자인 데이터 분석 시작...');
+            
+            const response = await fetch('/api/designs/stats');
+            console.log('API 응답 상태:', response.status);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('API 응답 데이터:', data);
+                
+                if (data.status === 'success') {
+                    this.designStats = data.stats;
+                    this.updateDesignAnalysisUI();
+                    this.setSmartDefaultTarget();
+                } else {
+                    console.error('API 응답 오류:', data.message);
+                    this.showAnalysisError('API 응답 오류: ' + data.message);
+                }
+            } else {
+                console.error('HTTP 오류:', response.status);
+                this.showAnalysisError('서버 연결 오류: ' + response.status);
+            }
+        } catch (error) {
+            console.error('디자인 분석 오류:', error);
+            this.showAnalysisError('네트워크 오류: ' + error.message);
+        }
+    }
+    
+    showAnalysisError(errorMessage) {
+        // 오류 발생 시 기본값으로 진행
+        document.getElementById('modal-loading').innerHTML = `
+            <div class="text-center py-4">
+                <i class="fa-solid fa-exclamation-triangle text-warning mb-3" style="font-size: 2rem;"></i>
+                <div class="text-danger mb-2">분석 오류 발생</div>
+                <small class="text-muted">${errorMessage}</small>
+                <div class="mt-3">
+                    <button class="btn btn-primary" onclick="rlhfSystem.useDefaultSettings()">
+                        기본 설정으로 계속
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+    
+    useDefaultSettings() {
+        // 기본값으로 설정
+        this.designStats = {
+            top_designs: 15,
+            random_designs: 15, 
+            total_designs: 30,
+            max_comparisons: 435
+        };
+        
+        this.updateDesignAnalysisUI();
+        this.setSmartDefaultTarget();
+    }
+    
+    updateDesignAnalysisUI() {
+        const stats = this.designStats;
+        
+        // 모달 내 통계 정보 업데이트
+        document.getElementById('modal-top-count').textContent = stats.top_designs;
+        document.getElementById('modal-random-count').textContent = stats.random_designs;
+        document.getElementById('modal-total-designs').textContent = stats.total_designs;
+        document.getElementById('modal-max-pairs').textContent = stats.max_comparisons;
+        
+        // 슬라이더 범위 업데이트
+        const maxTarget = Math.min(stats.max_comparisons, 500);
+        const slider = document.getElementById('modal-target-slider');
+        slider.max = maxTarget;
+        
+        // 스마트 버튼 값들 계산 및 업데이트
+        this.updateSmartButtons();
+        
+        // 로딩 숨기고 콘텐츠 표시
+        document.getElementById('modal-loading').style.display = 'none';
+        document.getElementById('modal-content').style.display = 'block';
+        document.getElementById('modal-footer').style.display = 'flex';
+        
+        console.log('디자인 분석 완료:', stats);
+    }
+    
+    updateSmartButtons() {
+        if (!this.designStats) return;
+        
+        const maxComparisons = Math.min(this.designStats.max_comparisons, 500);
+        
+        const quickTarget = Math.max(50, Math.floor(maxComparisons * 0.15));
+        const recommendedTarget = Math.max(100, Math.floor(maxComparisons * 0.35));
+        const thoroughTarget = Math.max(150, Math.floor(maxComparisons * 0.60));
+        
+        document.getElementById('quick-target').textContent = `${quickTarget}회`;
+        document.getElementById('recommended-target').textContent = `${recommendedTarget}회`;
+        document.getElementById('thorough-target').textContent = `${thoroughTarget}회`;
+        
+        // 추천값을 기본으로 설정
+        const slider = document.getElementById('modal-target-slider');
+        slider.value = recommendedTarget;
+        updateModalTarget(); // this. 제거
+    }
+    
+    setSmartDefaultTarget() {
+        if (!this.designStats) return;
+        
+        const totalDesigns = this.designStats.total_designs;
+        const maxComparisons = this.designStats.max_comparisons;
+        
+        // 스마트 기본값 계산
+        let recommendedTarget;
+        if (totalDesigns <= 10) {
+            recommendedTarget = Math.min(50, maxComparisons);
+        } else if (totalDesigns <= 20) {
+            recommendedTarget = Math.min(100, maxComparisons);
+        } else if (totalDesigns <= 30) {
+            recommendedTarget = Math.min(150, maxComparisons);
+        } else {
+            recommendedTarget = Math.min(200, maxComparisons);
+        }
+        
+        this.sessionStats.target_comparisons = recommendedTarget;
+        
+        // UI 업데이트
+        const slider = document.getElementById('target-slider');
+        const input = document.getElementById('target-input');
+        const currentTarget = document.getElementById('current-target');
+        
+        if (slider) slider.value = recommendedTarget;
+        if (input) input.value = recommendedTarget;
+        if (currentTarget) currentTarget.textContent = recommendedTarget;
+        
+        this.updateStats();
+        
+        console.log(`스마트 기본 목표 설정: ${recommendedTarget}회 (총 디자인: ${totalDesigns}개)`);
+    }
+    
+    async loadEnvironmentData() {
+        try {
+            console.log('환경 데이터 로딩 중...');
+            
+            // Contour.json 로드
+            const contourResponse = await fetch('/data/environment/Contour.json');
+            if (contourResponse.ok) {
+                this.environmentData.contour = await contourResponse.json();
+                console.log('Contour 데이터 로드 완료');
+            }
+            
+            // Sur.json 로드
+            const surfaceResponse = await fetch('/data/environment/Sur.json');
+            if (surfaceResponse.ok) {
+                this.environmentData.surface = await surfaceResponse.json();
+                console.log('Surface 데이터 로드 완료');
+            }
+            
+        } catch (error) {
+            console.warn('환경 데이터 로드 실패:', error);
+        }
+    }
+    
+    loadEnvironmentMeshes(side) {
+        const scene = this.scenes[side];
+        
+        // Contour 메시 로드 (진한 회색)
+        if (this.environmentData.contour) {
+            this.createEnvironmentMesh(scene, this.environmentData.contour, 0x555555, 'contour');
+        }
+        
+        // Surface 메시 로드 (파스텔 갈색)
+        if (this.environmentData.surface) {
+            this.createEnvironmentMesh(scene, this.environmentData.surface, 0xD2B48C, 'surface');
+        }
+    }
+    
+    createEnvironmentMesh(scene, meshData, color, type) {
+        try {
+            if (!meshData.meshes || !Array.isArray(meshData.meshes)) return;
+            
+            meshData.meshes.forEach(meshInfo => {
+                if (!meshInfo.vertices || !meshInfo.faces) return;
+                
+                const geometry = new THREE.BufferGeometry();
+                
+                // 정점 설정 (Grasshopper → Three.js 좌표계 변환)
+                const vertices = [];
+                for (let i = 0; i < meshInfo.vertices.length; i++) {
+                    const vertex = meshInfo.vertices[i];
+                    // Rhino/Grasshopper는 Z-up, Three.js는 Y-up
+                    // 변환 시도: X → X, Z → Y, Y → Z (Z와 Y를 바꿈)
+                    vertices.push(vertex[0], vertex[2], vertex[1]);
+                }
+                geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+                
+                // 면 설정
+                const indices = [];
+                meshInfo.faces.forEach(face => {
+                    if (face.length === 3) {
+                        indices.push(face[0], face[1], face[2]);
+                    } else if (face.length === 4) {
+                        indices.push(face[0], face[1], face[2]);
+                        indices.push(face[0], face[2], face[3]);
+                    }
+                });
+                
+                if (indices.length > 0) {
+                    geometry.setIndex(indices);
+                }
+                
+                geometry.computeVertexNormals();
+                
+                // 재질 생성 (환경에 맞는 색상)
+                const material = new THREE.MeshLambertMaterial({
+                    color: color,
+                    transparent: type === 'surface',
+                    opacity: type === 'surface' ? 0.6 : 1.0,
+                    side: THREE.DoubleSide
+                });
+                
+                const mesh = new THREE.Mesh(geometry, material);
+                mesh.userData.isEnvironmentMesh = true;
+                mesh.userData.envType = type;
+                mesh.receiveShadow = true; // 환경 메시는 그림자를 받기만 함
+                
+                // 환경 메시를 X축 기준으로 뒤집기 (X-Z 평면에서 뒤집기)
+                mesh.scale.set(1, 1, -1); // Z축을 뒤집음
+                
+                scene.add(mesh);
+            });
+            
+        } catch (error) {
+            console.error(`${type} 환경 메시 생성 오류:`, error);
         }
     }
     
@@ -92,12 +361,14 @@ class RLHFSystem {
         
         // Scene 생성
         this.scenes[side] = new THREE.Scene();
-        this.scenes[side].background = new THREE.Color(0x2c3e50);
+        // 라이트 모드 배경 (기본값)
+        this.updateViewerBackground(side, 'light');
         
         // Camera 생성
         this.cameras[side] = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
-        this.cameras[side].position.set(3, 3, 3);
-        this.cameras[side].lookAt(0, 0, 0);
+        // 초기 카메라 위치를 Perspective 뷰로 설정
+        this.cameras[side].position.set(5, 3, 5);
+        this.cameras[side].lookAt(0, 1, 0); // 약간 위쪽을 바라보도록
         
         // Renderer 생성
         this.renderers[side] = new THREE.WebGLRenderer({ 
@@ -106,6 +377,9 @@ class RLHFSystem {
         });
         this.renderers[side].setSize(width, height);
         this.renderers[side].setPixelRatio(window.devicePixelRatio);
+        // 그림자 활성화
+        this.renderers[side].shadowMap.enabled = true;
+        this.renderers[side].shadowMap.type = THREE.PCFSoftShadowMap;
         
         // Controls 생성
         if (typeof THREE.OrbitControls !== 'undefined') {
@@ -115,6 +389,13 @@ class RLHFSystem {
             );
             this.controls[side].enableDamping = true;
             this.controls[side].dampingFactor = 0.05;
+            
+            // 미터 단위 모델을 위한 컨트롤 조정
+            this.controls[side].rotateSpeed = 0.5; // 회전 속도 감소
+            this.controls[side].zoomSpeed = 0.5; // 줌 속도 적당히 조정
+            this.controls[side].panSpeed = 0.3; // 팬 속도 감소
+            this.controls[side].minDistance = 0.1; // 최소 거리
+            this.controls[side].maxDistance = 1000; // 최대 거리 크게 증가
         } else {
             console.warn('OrbitControls를 사용할 수 없습니다');
             this.controls[side] = {
@@ -140,26 +421,79 @@ class RLHFSystem {
         console.log(`뷰어 ${side.toUpperCase()} 초기화 완료`);
     }
     
+    updateViewerBackground(side, mode) {
+        this.viewerMode[side] = mode;
+        const scene = this.scenes[side];
+        
+        if (mode === 'light') {
+            scene.background = new THREE.Color(0x87CEEB); // 밝은 하늘색
+        } else {
+            scene.background = new THREE.Color(0x1a1a1a); // 어두운 회색
+        }
+    }
+    
+    toggleViewerMode(side) {
+        const currentMode = this.viewerMode[side];
+        const newMode = currentMode === 'light' ? 'dark' : 'light';
+        this.updateViewerBackground(side, newMode);
+        
+        // 그리드 헬퍼 색상도 업데이트
+        this.updateGridColors(side, newMode);
+    }
+    
+    updateGridColors(side, mode) {
+        const scene = this.scenes[side];
+        scene.traverse(object => {
+            if (object.isGridHelper) {
+                scene.remove(object);
+                object.dispose();
+            }
+        });
+        
+        // 새로운 그리드 추가
+        if (mode === 'light') {
+            const gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
+            gridHelper.isGridHelper = true;
+            scene.add(gridHelper);
+        } else {
+            const gridHelper = new THREE.GridHelper(10, 10, 0x888888, 0x666666);
+            gridHelper.isGridHelper = true;
+            scene.add(gridHelper);
+        }
+    }
+    
     setupLights(side) {
         const scene = this.scenes[side];
         
-        // 주변광
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        // 주변광 (약간 밝게)
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
         scene.add(ambientLight);
         
-        // 주 방향성 조명
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(5, 5, 5);
-        directionalLight.castShadow = true;
-        scene.add(directionalLight);
+        // 태양광 (주 방향성 조명 - 그림자 생성)
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        sunLight.position.set(10, 15, 5);
+        sunLight.castShadow = true;
         
-        // 보조 조명
+        // 그림자 설정
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 50;
+        sunLight.shadow.camera.left = -10;
+        sunLight.shadow.camera.right = 10;
+        sunLight.shadow.camera.top = 10;
+        sunLight.shadow.camera.bottom = -10;
+        
+        scene.add(sunLight);
+        
+        // 보조 조명 (그림자 완화용)
         const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-        fillLight.position.set(-5, 3, -5);
+        fillLight.position.set(-5, 5, -5);
         scene.add(fillLight);
         
         // 그리드 헬퍼
         const gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
+        gridHelper.isGridHelper = true;
         scene.add(gridHelper);
         
         // 축 헬퍼
@@ -259,15 +593,55 @@ class RLHFSystem {
         this.updateMetrics('a', designA);
         this.updateMetrics('b', designB);
         
-        // 현재 비교 쌍 업데이트
-        document.getElementById('current-pair').textContent = 
-            `${designA.id.split('_')[0]} vs ${designB.id.split('_')[0]}`;
+        // 양쪽 뷰어 모두 Perspective 뷰로 설정
+        setTimeout(() => {
+            this.setInitialPerspectiveView('a');
+            this.setInitialPerspectiveView('b');
+        }, 100); // 메시 로딩이 완전히 끝난 후 실행
+        
+        // 현재 비교 쌍 업데이트 (개선된 형식)
+        const designALabel = this.formatDesignLabel(designA.id);
+        const designBLabel = this.formatDesignLabel(designB.id);
+        document.getElementById('current-pair').textContent = `${designALabel} vs ${designBLabel}`;
+    }
+    
+    setInitialPerspectiveView(side) {
+        // setViewport 함수를 직접 호출
+        if (window.setViewport) {
+            setViewport(side, 'perspective');
+            console.log(`${side} 뷰어에 초기 Perspective 뷰 적용`);
+        }
+    }
+    
+    formatDesignLabel(designId) {
+        // 디자인 ID에서 카테고리와 번호 추출
+        if (designId.includes('random')) {
+            const match = designId.match(/random.*?(\d+)/i);
+            const num = match ? match[1].padStart(2, '0') : '00';
+            return `RANDOM ${num}`;
+        } else if (designId.includes('top')) {
+            const match = designId.match(/top.*?(\d+)/i);
+            const num = match ? match[1].padStart(2, '0') : '00';
+            return `TOP ${num}`;
+        } else if (designId.includes('mock') || designId.includes('fallback')) {
+            return designId.includes('_a') ? 'DEMO A' : 'DEMO B';
+        } else {
+            // 일반적인 경우
+            const parts = designId.split('_');
+            if (parts.length >= 2) {
+                return parts[0].toUpperCase() + ' ' + (parts[1] || '00').padStart(2, '0');
+            }
+            return designId.toUpperCase();
+        }
     }
     
     async loadMesh(side, design) {
         try {
-            // 기존 메시 제거
-            this.clearMesh(side);
+            // 기존 디자인 메시 제거 (환경 메시는 유지)
+            this.clearDesignMesh(side);
+            
+            // 환경 메시 로드 (처음에만)
+            this.loadEnvironmentMeshes(side);
             
             // 실제 메시 데이터가 있으면 API에서 로드 시도
             if (design.id && !design.id.startsWith('fallback_')) {
@@ -276,6 +650,12 @@ class RLHFSystem {
                     const data = await response.json();
                     if (data.status === 'success' && data.mesh) {
                         this.createMeshFromData(side, data.mesh);
+                        // 실제 메시 로드 후 Perspective 뷰 적용
+                        setTimeout(() => {
+                            if (window.setViewport) {
+                                setViewport(side, 'perspective');
+                            }
+                        }, 50);
                         return;
                     }
                 }
@@ -283,10 +663,22 @@ class RLHFSystem {
             
             // 대체: 기본 큐브 생성
             this.createDefaultMesh(side);
+            // 기본 큐브에 대해서도 Perspective 뷰 적용
+            setTimeout(() => {
+                if (window.setViewport) {
+                    setViewport(side, 'perspective');
+                }
+            }, 50);
             
         } catch (error) {
             console.error(`메시 로드 오류 (${side}):`, error);
             this.createDefaultMesh(side);
+            // 오류 시에도 Perspective 뷰 적용
+            setTimeout(() => {
+                if (window.setViewport) {
+                    setViewport(side, 'perspective');
+                }
+            }, 50);
         }
     }
     
@@ -308,8 +700,8 @@ class RLHFSystem {
                 const vertices = [];
                 for (let i = 0; i < meshInfo.vertices.length; i++) {
                     const vertex = meshInfo.vertices[i];
-                    // Grasshopper 좌표계 → Three.js 좌표계 변환
-                    // X → X, Y → Z, Z → -Y (일반적인 변환)
+                    // 환경 메시와 동일한 변환 적용
+                    // X → X, Y → Z, Z → -Y
                     vertices.push(vertex[0], vertex[2], -vertex[1]);
                 }
                 geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
@@ -331,9 +723,9 @@ class RLHFSystem {
                 
                 geometry.computeVertexNormals();
                 
-                // 재질 생성
+                // 재질 생성 (15% 어두운 회색)
                 const material = new THREE.MeshPhongMaterial({
-                    color: side === 'a' ? 0x3498db : 0xe74c3c,
+                    color: 0xBFBFBF, // 15% 어두워진 회색 (E0E0E0 → BFBFBF)
                     specular: 0x111111,
                     shininess: 30,
                     side: THREE.DoubleSide
@@ -341,13 +733,16 @@ class RLHFSystem {
                 
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.userData.isDesignMesh = true;
+                mesh.castShadow = true; // 그림자 생성
+                mesh.receiveShadow = true; // 그림자 받기
                 this.scenes[side].add(mesh);
                 allMeshes.push(mesh);
             });
             
-            // 메시들을 중앙 정렬하고 카메라 위치 조정
+            // 메시들을 바닥 기준으로 정렬
             if (allMeshes.length > 0) {
-                this.centerAndFitMeshes(side, allMeshes);
+                this.centerMeshesToGround(allMeshes);
+                console.log(`${side} 메시 위치 조정 완료: ${allMeshes.length}개 메시`);
             }
             
         } catch (error) {
@@ -356,7 +751,7 @@ class RLHFSystem {
         }
     }
     
-    centerAndFitMeshes(side, meshes) {
+    centerMeshes(meshes) {
         if (!meshes || meshes.length === 0) return;
         
         // 모든 메시의 경계 상자 계산
@@ -373,23 +768,74 @@ class RLHFSystem {
         meshes.forEach(mesh => {
             mesh.position.sub(center);
         });
+    }
+    
+    zoomToFitAll(side) {
+        console.log(`${side} 뷰어 줌 조정 시작`);
         
-        // 카메라 위치 자동 조정
+        // 디자인 메시만 대상으로 줌 조정 (환경 메시 제외)
+        const designMeshes = [];
+        this.scenes[side].traverse(object => {
+            if (object.userData.isDesignMesh) {
+                designMeshes.push(object);
+            }
+        });
+        
+        if (designMeshes.length === 0) {
+            console.log(`${side} 뷰어에 디자인 메시가 없음`);
+            return;
+        }
+        
+        console.log(`${side} 뷰어에서 ${designMeshes.length}개 메시 발견`);
+        
+        // 디자인 메시들의 경계 상자 계산
+        const box = new THREE.Box3();
+        designMeshes.forEach(mesh => {
+            box.expandByObject(mesh);
+        });
+        
+        // 크기 계산
         const size = new THREE.Vector3();
         box.getSize(size);
         const maxDim = Math.max(size.x, size.y, size.z);
         
+        console.log(`${side} 메시 크기:`, {
+            x: size.x.toFixed(2),
+            y: size.y.toFixed(2),
+            z: size.z.toFixed(2),
+            maxDim: maxDim.toFixed(2)
+        });
+        
         if (maxDim > 0) {
             const camera = this.cameras[side];
             const fov = camera.fov * (Math.PI / 180);
-            let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * 1.2;
+            let cameraDistance = Math.abs(maxDim / Math.sin(fov / 2)) * 2.5; // 여유 더 크게
             
-            // 카메라 위치 설정 (건축물 보기에 적합한 각도)
-            camera.position.set(cameraDistance, cameraDistance * 0.7, cameraDistance);
-            camera.lookAt(0, 0, 0);
+            // 건축물 관찰에 적합한 각도로 카메라 위치 설정
+            const buildingHeight = size.z;
+            const cameraHeight = Math.max(buildingHeight * 0.4, cameraDistance * 0.3);
+            
+            // 초기 로딩 시 Perspective 뷰로 설정
+            const newCameraPos = {
+                x: cameraDistance * 0.7,
+                y: cameraHeight,
+                z: cameraDistance * 0.7
+            };
+            
+            camera.position.set(newCameraPos.x, newCameraPos.y, newCameraPos.z);
+            
+            // 건물 중간 높이 정도를 바라보도록 설정
+            const lookAtHeight = buildingHeight * 0.3;
+            camera.lookAt(0, lookAtHeight, 0);
+            
+            console.log(`${side} 카메라 위치 (Perspective 뷰):`, {
+                position: `${newCameraPos.x.toFixed(2)}, ${newCameraPos.y.toFixed(2)}, ${newCameraPos.z.toFixed(2)}`,
+                lookAt: `0, ${lookAtHeight.toFixed(2)}, 0`,
+                distance: cameraDistance.toFixed(2)
+            });
             
             if (this.controls[side] && this.controls[side].target) {
-                this.controls[side].target.set(0, 0, 0);
+                this.controls[side].target.set(0, lookAtHeight, 0);
                 this.controls[side].update();
             }
         }
@@ -398,11 +844,35 @@ class RLHFSystem {
     createDefaultMesh(side) {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
         const material = new THREE.MeshPhongMaterial({
-            color: side === 'a' ? 0x3498db : 0xe74c3c
+            color: 0xBFBFBF // 15% 어두워진 회색으로 통일
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.isDesignMesh = true;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        
+        // 큐브를 바닥에 위치시키기 (큐브 바닥이 Z=0이 되도록)
+        mesh.position.set(0, 0, 0.5); // 큐브 높이의 절반만큼 위로
+        
         this.scenes[side].add(mesh);
+        console.log(`${side} 기본 큐브 생성됨 (바닥 기준 위치)`);
+    }
+    
+    clearDesignMesh(side) {
+        if (!this.scenes[side]) return;
+        
+        const meshesToRemove = [];
+        this.scenes[side].traverse(object => {
+            if (object.userData.isDesignMesh) {
+                meshesToRemove.push(object);
+            }
+        });
+        
+        meshesToRemove.forEach(mesh => {
+            this.scenes[side].remove(mesh);
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material) mesh.material.dispose();
+        });
     }
     
     clearMesh(side) {
@@ -410,7 +880,7 @@ class RLHFSystem {
         
         const meshesToRemove = [];
         this.scenes[side].traverse(object => {
-            if (object.userData.isDesignMesh) {
+            if (object.userData.isDesignMesh || object.userData.isEnvironmentMesh) {
                 meshesToRemove.push(object);
             }
         });
@@ -429,7 +899,7 @@ class RLHFSystem {
         const metrics = {
             bcr: this.formatMetric(state[0] * 100, '%', [0, 70]),
             far: this.formatMetric(state[1] * 100, '%', [200, 500]),
-            sunlight: this.formatMetric(state[2], 'kWh', [80000, 100000]),
+            sunlight: this.formatMetric(state[2], 'kWh/㎡', [80000, 100000]),
             svr: this.formatMetric(state[3], '', [0.7, 0.9])
         };
         
@@ -479,7 +949,7 @@ class RLHFSystem {
         let formattedValue;
         if (unit === '%') {
             formattedValue = `${value.toFixed(1)}${unit}`;
-        } else if (unit === 'kWh') {
+        } else if (unit === 'kWh/㎡') {
             formattedValue = `${(value/1000).toFixed(1)}k${unit}`;
         } else {
             formattedValue = `${value.toFixed(2)}${unit}`;
@@ -532,7 +1002,18 @@ class RLHFSystem {
                 const data = await response.json();
                 if (data.status === 'success') {
                     this.sessionStats.total_comparisons++;
+                    
+                    // 선택 히스토리에 추가
+                    const selectedDesign = side === 'a' ? designA : designB;
+                    const notSelectedDesign = side === 'a' ? designB : designA;
+                    this.selectionHistory.push({
+                        selected: selectedDesign,
+                        notSelected: notSelectedDesign,
+                        timestamp: Date.now()
+                    });
+                    
                     this.updateStats();
+                    this.analyzeSelectionTendency(); // 경향성 분석
                     
                     // 다음 비교로 이동
                     setTimeout(() => {
@@ -564,7 +1045,99 @@ class RLHFSystem {
     updateStats() {
         document.getElementById('total-comparisons').textContent = this.sessionStats.total_comparisons;
         const progress = (this.sessionStats.total_comparisons / this.sessionStats.target_comparisons) * 100;
-        document.getElementById('session-progress').textContent = `${Math.round(progress)}%`;
+        const progressText = `${Math.round(progress)}% (${this.sessionStats.total_comparisons}/${this.sessionStats.target_comparisons})`;
+        document.getElementById('session-progress').textContent = progressText;
+    }
+    
+    analyzeSelectionTendency() {
+        const historyCount = this.selectionHistory.length;
+        const tendencyElement = document.getElementById('selection-tendency');
+        
+        if (historyCount < 3) {
+            tendencyElement.textContent = '분석 중...';
+            tendencyElement.className = 'card-title text-secondary';
+            return;
+        }
+        
+        // 선택된 디자인들의 메트릭 평균 계산
+        const selectedMetrics = {
+            bcr: 0, far: 0, sunlight: 0, svr: 0
+        };
+        
+        this.selectionHistory.forEach(entry => {
+            const state = entry.selected.state || [0, 0, 0, 0];
+            selectedMetrics.bcr += state[0];
+            selectedMetrics.far += state[1];
+            selectedMetrics.sunlight += state[2];
+            selectedMetrics.svr += state[3];
+        });
+        
+        // 평균 계산
+        Object.keys(selectedMetrics).forEach(key => {
+            selectedMetrics[key] /= historyCount;
+        });
+        
+        // 경향성 분석
+        let tendency = '균형적';
+        let tendencyClass = 'text-info';
+        
+        // 주요 선호 메트릭 찾기
+        if (selectedMetrics.far > 3.5) {
+            tendency = 'FAR 선호';
+            tendencyClass = 'text-primary';
+        } else if (selectedMetrics.bcr > 0.6) {
+            tendency = '고밀도 선호';
+            tendencyClass = 'text-danger';
+        } else if (selectedMetrics.sunlight > 85000) {
+            tendency = '일사량 중시';
+            tendencyClass = 'text-warning';
+        } else if (selectedMetrics.svr > 0.85) {
+            tendency = 'SV비 중시';
+            tendencyClass = 'text-success';
+        }
+        
+        // 일관성 검사 (최근 3개 선택의 유사성)
+        if (historyCount >= 5) {
+            const recentSelections = this.selectionHistory.slice(-3);
+            const consistency = this.calculateConsistency(recentSelections);
+            
+            if (consistency > 0.8) {
+                tendency += ' (일관됨)';
+            } else if (consistency < 0.4) {
+                tendency += ' (혼재)';
+            }
+        }
+        
+        tendencyElement.textContent = tendency;
+        tendencyElement.className = `card-title ${tendencyClass}`;
+        
+        console.log('선택 경향성 분석:', {
+            count: historyCount,
+            metrics: selectedMetrics,
+            tendency: tendency
+        });
+    }
+    
+    calculateConsistency(recentSelections) {
+        if (recentSelections.length < 2) return 0;
+        
+        let consistencyScore = 0;
+        const metrics = ['bcr', 'far', 'sunlight', 'svr'];
+        
+        for (let i = 0; i < recentSelections.length - 1; i++) {
+            const current = recentSelections[i].selected.state || [0, 0, 0, 0];
+            const next = recentSelections[i + 1].selected.state || [0, 0, 0, 0];
+            
+            let similarity = 0;
+            for (let j = 0; j < 4; j++) {
+                const diff = Math.abs(current[j] - next[j]);
+                const range = Math.max(current[j], next[j]) - Math.min(current[j], next[j]);
+                similarity += range > 0 ? 1 - (diff / Math.max(current[j], next[j])) : 1;
+            }
+            consistencyScore += similarity / 4;
+        }
+        
+        return consistencyScore / (recentSelections.length - 1);
     }
     
     showLoading(show) {
@@ -593,23 +1166,49 @@ function loadNextComparison() {
 }
 
 function showHelp() {
-    alert('두 디자인 중 더 선호하는 디자인을 선택하세요.\n건축 지표를 참고하여 판단해주세요.');
+    const helpMessage = `
+🏗️ CAD 데이터 기반 RLHF 시스템 사용법
+
+📋 기본 사용법:
+• 두 디자인 중 더 선호하는 디자인을 선택하세요
+• 건축 지표(건폐율, 용적률, 일사량, SV Ratio)를 참고하여 판단
+
+⚙️ 목표 설정:
+• 슬라이더 또는 숫자 입력으로 목표 비교 횟수 조정 (10~500회)
+• 빠름(50회) / 보통(100회) / 긴(200회) 버튼으로 빠른 설정
+• 진행 중에도 목표 변경 가능
+
+🎮 뷰어 조작법:
+• 마우스 왼쪽 버튼 + 드래그: 회전
+• 마우스 휠: 확대/축소
+• 마우스 오른쪽 버튼 + 드래그: 이동
+
+🔧 뷰어 버튼:
+• ⬜ Top 뷰: 위에서 내려다보기
+• ⏹️ Front 뷰: 정면에서 보기  
+• 🧊 Perspective 뷰: 3D 관찰 각도
+• 🏠 뷰 리셋: ZoomSelected (전체 보기)
+• 📐 와이어프레임: 메시 윤곽선 보기
+• 💡 뷰어 배경 모드: 개별 뷰어 배경 변경
+• 📷 스크린샷 저장
+
+🎨 테마:
+• 헤더 오른쪽 버튼: 시스템 전체 라이트/다크 테마
+• F 키: 양쪽 뷰어 배경 동시 전환
+
+💡 팁:
+• 미터 단위 모델로 작은 크기일 수 있으니 천천히 조작하세요
+• Top/Front 뷰로 좌표계 정렬을 쉽게 확인할 수 있습니다
+• 선택의 경향성은 3회 이상 선택 후부터 분석됩니다
+    `;
+    alert(helpMessage);
 }
 
 // 뷰어 컨트롤 함수들
 function resetView(side) {
     if (rlhfSystem && rlhfSystem.cameras[side] && rlhfSystem.controls[side]) {
-        const camera = rlhfSystem.cameras[side];
-        const controls = rlhfSystem.controls[side];
-        
-        // 건축물 보기에 적합한 기본 위치로 리셋
-        camera.position.set(5, 3.5, 5);
-        camera.lookAt(0, 0, 0);
-        
-        if (controls.target) {
-            controls.target.set(0, 0, 0);
-            controls.update();
-        }
+        // ZoomSelected 유사 기능 - 디자인에 맞춰 줌
+        rlhfSystem.zoomToFitAll(side);
     }
 }
 
@@ -636,6 +1235,223 @@ function captureView(side) {
         link.click();
         
         // 성공 메시지 표시
-        rlhfSystem.showNotification(`디자인 ${side.toUpperCase()} 스크린샷이 저장되었습니다.`, 'success');
+        showNotification(`디자인 ${side.toUpperCase()} 스크린샷이 저장되었습니다.`, 'success');
     }
+}
+
+function toggleSystemTheme() {
+    if (!rlhfSystem) return;
+    
+    const newTheme = rlhfSystem.systemTheme === 'light' ? 'dark' : 'light';
+    rlhfSystem.systemTheme = newTheme;
+    
+    // HTML 문서에 테마 클래스 적용
+    document.documentElement.setAttribute('data-theme', newTheme);
+    
+    // 아이콘 변경
+    const themeIcon = document.getElementById('theme-icon');
+    if (themeIcon) {
+        if (newTheme === 'dark') {
+            themeIcon.className = 'fa-solid fa-moon';
+        } else {
+            themeIcon.className = 'fa-solid fa-sun';
+        }
+    }
+    
+    console.log(`시스템 테마를 ${newTheme} 모드로 변경`);
+}
+
+function setViewport(side, viewType) {
+    if (!rlhfSystem || !rlhfSystem.cameras[side]) return;
+    
+    const camera = rlhfSystem.cameras[side];
+    const controls = rlhfSystem.controls[side];
+    
+    // 디자인 메시들의 경계 상자를 구해서 적절한 거리 계산
+    const designMeshes = [];
+    rlhfSystem.scenes[side].traverse(object => {
+        if (object.userData.isDesignMesh) {
+            designMeshes.push(object);
+        }
+    });
+    
+    let distance = 10; // 기본 거리
+    let center = new THREE.Vector3(0, 0, 0);
+    
+    if (designMeshes.length > 0) {
+        const box = new THREE.Box3();
+        designMeshes.forEach(mesh => {
+            box.expandByObject(mesh);
+        });
+        
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        distance = Math.max(size.x, size.y, size.z) * 2;
+        box.getCenter(center);
+    }
+    
+    // 뷰포트별 카메라 위치 설정
+    switch (viewType.toLowerCase()) {
+        case 'top':
+            // Top 뷰: 위에서 아래로 내려다보기
+            camera.position.set(center.x, center.y + distance, center.z);
+            camera.lookAt(center);
+            break;
+            
+        case 'front':
+            // Front 뷰: 남쪽(앞)에서 북쪽(뒤)으로 보기 (Z축 양의 방향에서)
+            camera.position.set(center.x, center.y, center.z + distance);
+            camera.lookAt(center);
+            break;
+            
+        case 'perspective':
+            // Perspective 뷰: 3D 관찰 각도
+            camera.position.set(
+                center.x + distance * 0.7, 
+                center.y + distance * 0.5, 
+                center.z + distance * 0.7
+            );
+            camera.lookAt(center);
+            break;
+            
+        default:
+            console.warn(`알 수 없는 뷰 타입: ${viewType}`);
+            return;
+    }
+    
+    // 컨트롤 타겟 업데이트
+    if (controls && controls.target) {
+        controls.target.copy(center);
+        controls.update();
+    }
+    
+    console.log(`${side} 뷰어를 ${viewType} 뷰로 설정함`);
+}
+
+function toggleViewerMode(side) {
+    if (rlhfSystem) {
+        rlhfSystem.toggleViewerMode(side);
+    }
+}
+
+// 키보드 단축키
+document.addEventListener('keydown', (event) => {
+    if (event.key === 'f' || event.key === 'F') {
+        // F 키로 양쪽 뷰어 모드 동시 전환
+        // 현재 A 뷰어의 모드를 확인해서 반대로 설정
+        if (rlhfSystem) {
+            const currentModeA = rlhfSystem.viewerMode.a;
+            const newMode = currentModeA === 'light' ? 'dark' : 'light';
+            
+            // 양쪽 뷰어를 같은 모드로 설정
+            rlhfSystem.updateViewerBackground('a', newMode);
+            rlhfSystem.updateViewerBackground('b', newMode);
+            
+            console.log(`F키: 양쪽 뷰어를 ${newMode} 모드로 전환`);
+        }
+    }
+});
+
+// DOM 로드 완료 시 초기화
+document.addEventListener('DOMContentLoaded', () => {
+    rlhfSystem = new RLHFSystem();
+});
+
+// 모달 관련 함수들
+function updateModalTarget() {
+    const slider = document.getElementById('modal-target-slider');
+    const display = document.getElementById('modal-target-display');
+    const info = document.getElementById('modal-target-info');
+    const time = document.getElementById('estimated-time');
+    
+    const value = parseInt(slider.value);
+    display.textContent = value;
+    
+    if (rlhfSystem && rlhfSystem.designStats) {
+        const percentage = Math.round((value / rlhfSystem.designStats.max_comparisons) * 100);
+        info.textContent = `전체 비교의 ${percentage}%`;
+    }
+    
+    const estimatedMinutes = Math.ceil(value / 4);
+    time.textContent = `${estimatedMinutes}분`;
+}
+
+function setModalTarget(type) {
+    if (!rlhfSystem || !rlhfSystem.designStats) return;
+    
+    const maxComparisons = Math.min(rlhfSystem.designStats.max_comparisons, 500);
+    let target;
+    
+    switch (type) {
+        case 'quick':
+            target = Math.max(50, Math.floor(maxComparisons * 0.15));
+            break;
+        case 'recommended':
+            target = Math.max(100, Math.floor(maxComparisons * 0.35));
+            break;
+        case 'thorough':
+            target = Math.max(150, Math.floor(maxComparisons * 0.60));
+            break;
+    }
+    
+    const slider = document.getElementById('modal-target-slider');
+    slider.value = target;
+    updateModalTarget();
+}
+
+function startSession() {
+    const slider = document.getElementById('modal-target-slider');
+    const targetValue = parseInt(slider.value);
+    
+    // 목표값 설정
+    if (rlhfSystem) {
+        rlhfSystem.sessionStats.target_comparisons = targetValue;
+        rlhfSystem.updateStats();
+    }
+    
+    // 모달 닫기 (여러 방법으로 시도)
+    const modalElement = document.getElementById('targetSetupModal');
+    
+    try {
+        // Bootstrap 5 방식
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modal) {
+                modal.hide();
+            } else {
+                // 인스턴스가 없으면 새로 생성해서 닫기
+                const newModal = new bootstrap.Modal(modalElement);
+                newModal.hide();
+            }
+        } else {
+            // 수동으로 모달 닫기
+            modalElement.style.display = 'none';
+            modalElement.classList.remove('show');
+            document.body.classList.remove('modal-open');
+            
+            // 배경 오버레이 제거
+            const backdrop = document.querySelector('.modal-backdrop');
+            if (backdrop) {
+                backdrop.remove();
+            }
+        }
+    } catch (error) {
+        console.error('모달 닫기 오류:', error);
+        // 강제로 숨기기
+        modalElement.style.display = 'none';
+        modalElement.classList.remove('show');
+        document.body.classList.remove('modal-open');
+        
+        const backdrop = document.querySelector('.modal-backdrop');
+        if (backdrop) {
+            backdrop.remove();
+        }
+    }
+    
+    // 첫 번째 비교 로드
+    if (rlhfSystem) {
+        rlhfSystem.loadNextComparison();
+    }
+    
+    console.log(`세션 시작: 목표 ${targetValue}회`);
 }

@@ -17,9 +17,10 @@ DATA_DIR = os.path.join(PROJECT_ROOT, 'data')
 DESIGNS_DIR = os.path.join(DATA_DIR, 'designs')
 MESHES_DIR = os.path.join(DATA_DIR, 'meshes')
 FEEDBACK_DIR = os.path.join(DATA_DIR, 'feedback')
+ENVIRONMENT_DIR = os.path.join(DATA_DIR, 'environment')
 
 # 디렉토리 생성
-for directory in [DATA_DIR, DESIGNS_DIR, MESHES_DIR, FEEDBACK_DIR]:
+for directory in [DATA_DIR, DESIGNS_DIR, MESHES_DIR, FEEDBACK_DIR, ENVIRONMENT_DIR]:
     os.makedirs(directory, exist_ok=True)
 
 # Flask 앱 생성
@@ -197,12 +198,56 @@ def get_session_stats():
         'session': current_session
     })
 
+@app.route('/api/designs/stats', methods=['GET'])
+def get_design_stats():
+    """디자인 통계 정보 (카테고리별 개수, 가능한 비교 쌍 수)"""
+    try:
+        top_designs = 0
+        random_designs = 0
+        other_designs = 0
+        
+        # designs 디렉토리에서 파일들 분석
+        if os.path.exists(DESIGNS_DIR):
+            for filename in os.listdir(DESIGNS_DIR):
+                if filename.endswith('.json'):
+                    if 'top' in filename.lower():
+                        top_designs += 1
+                    elif 'random' in filename.lower():
+                        random_designs += 1
+                    else:
+                        other_designs += 1
+        
+        total_designs = top_designs + random_designs + other_designs
+        
+        # 가능한 비교 쌍 수 계산 (조합: nC2 = n*(n-1)/2)
+        max_comparisons = total_designs * (total_designs - 1) // 2 if total_designs > 1 else 0
+        
+        return jsonify({
+            'status': 'success',
+            'stats': {
+                'top_designs': top_designs,
+                'random_designs': random_designs,
+                'other_designs': other_designs,
+                'total_designs': total_designs,
+                'max_comparisons': max_comparisons
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # 정적 파일 제공
 @app.route('/static/<path:filename>')
 def static_files(filename):
     """정적 파일 제공"""
     static_dir = os.path.join(os.path.dirname(__file__), 'static')
     return send_from_directory(static_dir, filename)
+
+# 데이터 파일 제공
+@app.route('/data/<path:filename>')
+def data_files(filename):
+    """데이터 파일 제공 (환경 데이터 포함)"""
+    return send_from_directory(DATA_DIR, filename)
 
 if __name__ == '__main__':
     print("RLHF 간단한 서버 시작...")
