@@ -373,13 +373,18 @@ class RLHFSystem {
         // Renderer 생성
         this.renderers[side] = new THREE.WebGLRenderer({ 
             antialias: true,
-            alpha: true 
+            alpha: true,
+            powerPreference: "high-performance", // RTX 3090 활용
+            precision: "highp"
         });
         this.renderers[side].setSize(width, height);
         this.renderers[side].setPixelRatio(window.devicePixelRatio);
         // 그림자 활성화
         this.renderers[side].shadowMap.enabled = true;
         this.renderers[side].shadowMap.type = THREE.PCFSoftShadowMap;
+        // 톤 매핑 설정
+        this.renderers[side].toneMapping = THREE.ACESFilmicToneMapping;
+        this.renderers[side].toneMappingExposure = 1.2;
         
         // Controls 생성
         if (typeof THREE.OrbitControls !== 'undefined') {
@@ -452,11 +457,11 @@ class RLHFSystem {
         
         // 새로운 그리드 추가
         if (mode === 'light') {
-            const gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
+            const gridHelper = new THREE.GridHelper(20, 40, 0x555555, 0x333333);
             gridHelper.isGridHelper = true;
             scene.add(gridHelper);
         } else {
-            const gridHelper = new THREE.GridHelper(10, 10, 0x888888, 0x666666);
+            const gridHelper = new THREE.GridHelper(20, 40, 0x888888, 0x666666);
             gridHelper.isGridHelper = true;
             scene.add(gridHelper);
         }
@@ -465,34 +470,56 @@ class RLHFSystem {
     setupLights(side) {
         const scene = this.scenes[side];
         
-        // 주변광 (약간 밝게)
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        // 주변광 (약간 밝게, 따뜻한 톤)
+        const ambientLight = new THREE.AmbientLight(0xfff5e6, 0.5);
         scene.add(ambientLight);
         
+        // 반구광 (하늘색과 지면색)
+        const hemisphereLight = new THREE.HemisphereLight(
+            0x87CEEB, // 하늘색
+            0x8B7355, // 지면색 (갈색)
+            0.4
+        );
+        scene.add(hemisphereLight);
+        
         // 태양광 (주 방향성 조명 - 그림자 생성)
-        const sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
-        sunLight.position.set(10, 15, 5);
+        const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        sunLight.position.set(15, 20, 10);
         sunLight.castShadow = true;
         
-        // 그림자 설정
-        sunLight.shadow.mapSize.width = 2048;
-        sunLight.shadow.mapSize.height = 2048;
-        sunLight.shadow.camera.near = 0.5;
-        sunLight.shadow.camera.far = 50;
-        sunLight.shadow.camera.left = -10;
-        sunLight.shadow.camera.right = 10;
-        sunLight.shadow.camera.top = 10;
-        sunLight.shadow.camera.bottom = -10;
+        // 고품질 그림자 설정 (RTX 3090용)
+        sunLight.shadow.mapSize.width = 4096;
+        sunLight.shadow.mapSize.height = 4096;
+        sunLight.shadow.camera.near = 0.1;
+        sunLight.shadow.camera.far = 100;
+        sunLight.shadow.camera.left = -20;
+        sunLight.shadow.camera.right = 20;
+        sunLight.shadow.camera.top = 20;
+        sunLight.shadow.camera.bottom = -20;
+        
+        // 부드러운 그림자를 위한 반경 설정
+        sunLight.shadow.radius = 4;
+        sunLight.shadow.blurSamples = 25;
         
         scene.add(sunLight);
         
-        // 보조 조명 (그림자 완화용)
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-        fillLight.position.set(-5, 5, -5);
-        scene.add(fillLight);
+        // 보조 조명 1 (북쪽에서 오는 부드러운 빛)
+        const fillLight1 = new THREE.DirectionalLight(0xe6f2ff, 0.4);
+        fillLight1.position.set(-10, 15, -10);
+        scene.add(fillLight1);
         
-        // 그리드 헬퍼
-        const gridHelper = new THREE.GridHelper(10, 10, 0x555555, 0x333333);
+        // 보조 조명 2 (측면 강조)
+        const fillLight2 = new THREE.DirectionalLight(0xfff0e6, 0.3);
+        fillLight2.position.set(10, 5, -5);
+        scene.add(fillLight2);
+        
+        // 포인트 라이트 (근처 환경 조명 시뮬레이션)
+        const pointLight = new THREE.PointLight(0xffffff, 0.2, 30);
+        pointLight.position.set(0, 10, 0);
+        scene.add(pointLight);
+        
+        // 그리드 헬퍼 (더 세밀하게)
+        const gridHelper = new THREE.GridHelper(20, 40, 0x555555, 0x333333);
         gridHelper.isGridHelper = true;
         scene.add(gridHelper);
         
@@ -691,7 +718,21 @@ class RLHFSystem {
             
             const allMeshes = [];
             
-            meshData.meshes.forEach(meshInfo => {
+            // 파스텔 색상 팔레트 (입면용)
+            const pastelColors = [
+                0xFFE4E1, // 미스티 로즈
+                0xE6E6FA, // 라벤더
+                0xF0E68C, // 카키
+                0xFFDAB9, // 피치 퍼프
+                0xB0E0E6, // 파우더 블루
+                0xD8BFD8, // 시슬
+                0xF5DEB3, // 위트
+                0xFAF0E6, // 리넨
+                0xFFE4B5, // 모카신
+                0xF0FFFF  // 아주르
+            ];
+            
+            meshData.meshes.forEach((meshInfo, meshIndex) => {
                 if (!meshInfo.vertices || !meshInfo.faces) return;
                 
                 const geometry = new THREE.BufferGeometry();
@@ -700,9 +741,10 @@ class RLHFSystem {
                 const vertices = [];
                 for (let i = 0; i < meshInfo.vertices.length; i++) {
                     const vertex = meshInfo.vertices[i];
-                    // 환경 메시와 동일한 변환 적용
-                    // X → X, Y → Z, Z → -Y
-                    vertices.push(vertex[0], vertex[2], -vertex[1]);
+                    // 환경 메시와 완전히 동일한 변환 적용
+                    // Rhino/Grasshopper는 Z-up, Three.js는 Y-up
+                    // 변환 시도: X → X, Z → Y, Y → Z (Z와 Y를 바꿈)
+                    vertices.push(vertex[0], vertex[2], vertex[1]);
                 }
                 geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
                 
@@ -723,26 +765,76 @@ class RLHFSystem {
                 
                 geometry.computeVertexNormals();
                 
-                // 재질 생성 (15% 어두운 회색)
-                const material = new THREE.MeshPhongMaterial({
-                    color: 0xBFBFBF, // 15% 어두워진 회색 (E0E0E0 → BFBFBF)
-                    specular: 0x111111,
-                    shininess: 30,
-                    side: THREE.DoubleSide
-                });
+                // 면의 방향을 분석하여 수평/수직 판단
+                const normals = geometry.getAttribute('normal').array;
+                let horizontalScore = 0;
+                let verticalScore = 0;
+                
+                // 모든 정점의 법선 벡터를 분석
+                for (let i = 0; i < normals.length; i += 3) {
+                    const nx = Math.abs(normals[i]);
+                    const ny = Math.abs(normals[i + 1]);
+                    const nz = Math.abs(normals[i + 2]);
+                    
+                    // Y축이 위쪽을 향하는 Three.js 좌표계에서
+                    // ny가 크면 수평면(천장/바닥), nx나 nz가 크면 수직면(벽)
+                    if (ny > 0.7) {
+                        horizontalScore++;
+                    } else if (nx > 0.5 || nz > 0.5) {
+                        verticalScore++;
+                    }
+                }
+                
+                const isHorizontal = horizontalScore > verticalScore;
+                
+                // 재질 생성
+                let material;
+                if (isHorizontal) {
+                    // 수평면(천장/바닥): 짙은 갈색/검정 계열
+                    const darkColors = [0x2C1810, 0x1A0E05, 0x0D0D0D, 0x1C1C1C, 0x2F2519];
+                    const selectedColor = darkColors[meshIndex % darkColors.length];
+                    
+                    material = new THREE.MeshPhysicalMaterial({
+                        color: selectedColor,
+                        roughness: 0.9,
+                        metalness: 0.1,
+                        clearcoat: 0.3,
+                        clearcoatRoughness: 0.7,
+                        side: THREE.DoubleSide
+                    });
+                } else {
+                    // 수직면(입면): 파스텔 톤 랜덤
+                    const selectedColor = pastelColors[meshIndex % pastelColors.length];
+                    
+                    material = new THREE.MeshPhysicalMaterial({
+                        color: selectedColor,
+                        roughness: 0.3,
+                        metalness: 0.0,
+                        clearcoat: 0.5,
+                        clearcoatRoughness: 0.3,
+                        transmission: 0.1, // 약간의 투명도
+                        thickness: 0.5,
+                        side: THREE.DoubleSide
+                    });
+                }
                 
                 const mesh = new THREE.Mesh(geometry, material);
                 mesh.userData.isDesignMesh = true;
+                mesh.userData.isHorizontal = isHorizontal;
                 mesh.castShadow = true; // 그림자 생성
                 mesh.receiveShadow = true; // 그림자 받기
+                
+                // 환경 메시와 동일하게 X축 기준으로 뒤집기 (X-Z 평면에서 뒤집기)
+                mesh.scale.set(1, 1, -1); // Z축을 뒤집음
+                
                 this.scenes[side].add(mesh);
                 allMeshes.push(mesh);
             });
             
             // 메시들을 바닥 기준으로 정렬
             if (allMeshes.length > 0) {
-                this.centerMeshesToGround(allMeshes);
-                console.log(`${side} 메시 위치 조정 완료: ${allMeshes.length}개 메시`);
+                // centerMeshes 호출 제거 - 원본 디자인의 원점 유지
+                console.log(`${side} 메시 로드 완료: ${allMeshes.length}개 메시`);
             }
             
         } catch (error) {
@@ -843,16 +935,20 @@ class RLHFSystem {
     
     createDefaultMesh(side) {
         const geometry = new THREE.BoxGeometry(1, 1, 1);
-        const material = new THREE.MeshPhongMaterial({
-            color: 0xBFBFBF // 15% 어두워진 회색으로 통일
+        const material = new THREE.MeshPhysicalMaterial({
+            color: 0xBFBFBF,
+            roughness: 0.5,
+            metalness: 0.1,
+            clearcoat: 0.3,
+            side: THREE.DoubleSide
         });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.userData.isDesignMesh = true;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         
-        // 큐브를 바닥에 위치시키기 (큐브 바닥이 Z=0이 되도록)
-        mesh.position.set(0, 0, 0.5); // 큐브 높이의 절반만큼 위로
+        // 큐브를 바닥에 위치시키기 (큐브 바닥이 Y=0이 되도록)
+        mesh.position.set(0, 0.5, 0); // 큐브 높이의 절반만큼 위로
         
         this.scenes[side].add(mesh);
         console.log(`${side} 기본 큐브 생성됨 (바닥 기준 위치)`);
