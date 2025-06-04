@@ -1,330 +1,434 @@
-# Grasshopper RLHF System
+# GH_RLHF (Grasshopper Reinforcement Learning from Human Feedback)
 
-A comprehensive framework for Reinforcement Learning with Human Feedback (RLHF) in Grasshopper 3D modeling environments.
+이 프로젝트는 Grasshopper와 Python 간의 통신을 기반으로 강화학습에서 인간 피드백(RLHF, Reinforcement Learning from Human Feedback)을 구현하는 시스템입니다. 건축 및 디자인 분야에서 파라메트릭 모델링과 인공지능을 결합하여 더 나은 설계 결과를 도출합니다.
 
-## Overview
+## 프로젝트 개요
 
-This system enables the application of reinforcement learning techniques to parametric architectural designs created in Grasshopper, with a human feedback collection mechanism that helps refine the RL model based on human preferences and design expertise.
+GH_RLHF는 파라메트릭 디자인 도구인 Grasshopper와 강화학습을 결합하여 인간의 피드백을 통해 더 나은 설계 결과를 도출하는 프레임워크입니다. 이 시스템은 다음과 같은 주요 구성 요소로 이루어져 있습니다:
 
-The framework consists of:
-1. **Reinforcement Learning components** (Python) that interact with Grasshopper models
-2. **ZMQ communication layer** (C# + Python) for bidirectional data exchange
-3. **Human feedback interface** (Flask web application) for collecting design evaluations
-4. **Analysis tools** (Python) for processing and integrating feedback data
-5. **Reward model** training system that incorporates human preferences
+1. **Grasshopper 컴포넌트**: C# 스크립트로 작성된 Grasshopper 컴포넌트
+2. **서버**: 인간 피드백 데이터를 수집하기 위한 웹 기반 GUI
+3. **강화학습 모델**: Python으로 구현된 보상 모델 및 학습 알고리즘
 
-## System Architecture
+## 시스템 아키텍처 및 파이프라인
+
+GH_RLHF 파이프라인은 다음과 같은 순환적 과정으로 구성됩니다:
 
 ```
-┌─────────────────┐           ┌─────────────────┐          ┌─────────────────┐
-│  Grasshopper    │◄──ZMQ────►│  Python RL      │◄────────►│  Human          │
-│  Environment    │           │  Environment    │          │  Feedback UI    │
-└─────────────────┘           └─────────────────┘          └─────────────────┘
-         ▲                            ▲                           ▲
-         │                            │                           │
-         │                            │                           │
-         └────────────────────────────┴───────────────────────────┘
-                          Data Storage & Analysis
++------------------------+       +------------------------+       +------------------------+
+|     Grasshopper        | ----> |    Python RL 모듈       | ----> |        웹 GUI          |
+|   (파라미터 생성)        |       |   (디자인 옵션 생성)     |       |   (디자인 시각화)       |
++------------------------+       +------------------------+       +------------------------+
+          ^                                                                  |
+          |                                                                  |
+          |                                                                  v
++------------------------+       +------------------------+       +------------------------+
+|    최적화된 디자인       | <---- |     정책 최적화         | <---- |      인간 피드백        |
+|  (새로운 파라미터 적용)   |       |  (강화학습 알고리즘)     |       |  (평가 및 선호도 입력)   |
++------------------------+       +------------------------+       +------------------------+
+                                          ^                                 |
+                                          |                                 |
+                                          |                                 v
+                                 +------------------------+       +------------------------+
+                                 |     보상 모델 학습       | <---- |   피드백 데이터 저장     |
+                                 |  (인간 선호도 모델링)     |       |   (JSON 형식 저장)     |
+                                 +------------------------+       +------------------------+
 ```
 
-## Prerequisites
+### 1. Grasshopper 컴포넌트
 
-### Software Requirements
-- Rhino 6/7 with Grasshopper
-- Python 3.7+ with required packages
-- Visual Studio for C# components (.NET Framework 4.8)
-- Git for version control
+`Grasshopper Component` 폴더의 `RLHFComponent.cs`는 Grasshopper와 Python 사이의 통신을 담당하는 핵심 컴포넌트입니다. 이 컴포넌트는 다음과 같은 역할을 수행합니다:
 
-### Installation of Python Dependencies
+- HTTP 요청을 통한 Python 서버와의 데이터 교환
+- 디자인 파라미터 생성 및 전송
+- 학습된 모델의 결과를 Grasshopper 환경에 시각화
+- 설계 제약 조건 관리 및 적용
+
+**컴포넌트 주요 기능**:
+- `SendDesignParameters()`: 현재 디자인 파라미터를 Python 서버로 전송
+- `ReceiveOptimizedParameters()`: 최적화된 파라미터를 서버로부터 수신
+- `UpdateVisualization()`: 수신된 파라미터를 기반으로 Grasshopper 내 시각화 갱신
+
+**컴포넌트 빌드 과정**:
+1. Visual Studio 또는 다른 C# IDE에서 RLHFComponent.cs 컴파일
+2. 생성된 DLL 파일을 Grasshopper용 GHA 파일로 변환
+   ```
+   "C:\Program Files\Rhino 7\Plug-ins\Grasshopper\GrasshopperDeveloperUtils\GhPython.exe" /package DLL을GHA로변환 DLL파일경로
+   ```
+3. 생성된 GHA 파일을 Grasshopper 컴포넌트 폴더(보통 `%AppData%\Grasshopper\Libraries`)에 배치
+
+### 2. 웹 기반 GUI 서버
+
+`server` 폴더에는 Node.js 기반의 웹 서버와 인간 피드백을 수집하기 위한 인터페이스가 포함되어 있습니다:
+
+**서버 구성요소**:
+- **Express.js 백엔드**: `app.js`에서 API 엔드포인트 및 라우팅 처리
+- **웹소켓 통신**: 실시간 데이터 전송을 위한 Socket.IO 구현
+- **정적 리소스**: HTML, CSS, JavaScript로 구현된 피드백 인터페이스
+
+**주요 API 엔드포인트**:
+- `/api/designs`: 디자인 옵션 데이터 제공
+- `/api/feedback`: 사용자 피드백 수집
+- `/api/sessions`: 세션 관리
+
+사용자는 GUI를 통해 생성된 디자인 옵션들을 비교하고 평가할 수 있으며, 이 데이터는 JSON 형식으로 저장되어 보상 모델 학습에 활용됩니다.
+
+### 3. Python 강화학습 모듈
+
+`rl` 폴더의 Python 코드는 다음과 같은 주요 기능을 담당합니다:
+
+**주요 구성 요소**:
+- **보상 모델(`rl/models/reward_model.py`)**: 인간 피드백 데이터를 기반으로 설계의 품질 예측
+- **정책 모델(`rl/models/policy_model.py`)**: 보상을 최대화하는 디자인 파라미터 생성
+- **학습 알고리즘(`rl/train.py`)**: PPO(Proximal Policy Optimization) 기반 정책 최적화
+- **유틸리티 함수(`rl/utils/`)**: 데이터 처리 및 통신을 위한 보조 기능
+
+**보상 모델 아키텍처**:
+- 다층 퍼셉트론(MLP) 네트워크 사용
+- 디자인 파라미터를 입력으로 받아 품질 점수 예측
+- 인간 피드백 데이터로 지도 학습
+
+**정책 모델 구현**:
+- 가우시안 정책 네트워크 사용
+- 현재 상태를 입력으로 받아 디자인 파라미터 분포 출력
+- 강화학습을 통해 기대 보상 최대화
+
+## 데이터 흐름 상세
+
+RLHF 시스템의 데이터 흐름은 다음과 같은 단계로 이루어집니다:
+
+1. **초기화 단계**:
+   - Grasshopper에서 디자인 파라미터 공간 정의 및 제약 조건 설정
+   - Python 서버 및 웹 GUI 서버 실행
+
+2. **디자인 생성 단계**:
+   - 정책 모델이 현재 상태에서 디자인 파라미터 샘플링
+   - 샘플링된 파라미터를 Grasshopper로 전송하여 3D 모델 생성
+   - 생성된 디자인의 시각적 표현(이미지, 메트릭스) 추출
+
+3. **피드백 수집 단계**:
+   - 웹 GUI를 통해 사용자에게 여러 디자인 옵션 제시
+   - 사용자가 각 디자인에 대한 선호도 점수 및 코멘트 제공
+   - 피드백 데이터가 서버에 저장되고 Python 모듈로 전송
+
+4. **모델 학습 단계**:
+   - 수집된 피드백을 기반으로 보상 모델 재학습
+   - 업데이트된 보상 모델을 사용하여 정책 모델 최적화
+   - 새로운 정책을 통한 향상된 디자인 파라미터 생성
+
+5. **반복 및 개선 단계**:
+   - 최적화된 파라미터로 새로운 디자인 생성
+   - 사용자 피드백 재수집 및 모델 재학습
+   - 설계 품질이 수렴될 때까지 과정 반복
+
+## 데이터 형식 예시
+
+### Grasshopper -> Python 데이터 형식
+```json
+{
+  "design_parameters": [0.5, 0.3, 0.7, 0.2, 0.6],
+  "constraints": {
+    "max_height": 10.0,
+    "min_width": 5.0,
+    "structural_limit": 15.0
+  },
+  "session_id": "design_session_001",
+  "iteration": 5
+}
+```
+
+### Python -> GUI 데이터 형식
+```json
+{
+  "design_options": [
+    {
+      "id": "design_001",
+      "preview_url": "http://localhost:8000/previews/design_001.png",
+      "parameters": [0.5, 0.3, 0.7, 0.2, 0.6],
+      "metrics": {
+        "height": 8.7,
+        "width": 6.2,
+        "material_usage": 120.5
+      }
+    },
+    {
+      "id": "design_002",
+      "preview_url": "http://localhost:8000/previews/design_002.png",
+      "parameters": [0.4, 0.6, 0.5, 0.3, 0.5],
+      "metrics": {
+        "height": 7.5,
+        "width": 7.1,
+        "material_usage": 115.2
+      }
+    }
+  ],
+  "session_id": "design_session_001",
+  "iteration": 5
+}
+```
+
+### GUI -> Python 피드백 데이터 형식
+```json
+{
+  "feedback": [
+    {
+      "design_id": "design_001",
+      "score": 7.5,
+      "preference_rank": 1,
+      "comments": "좋은 비율이지만 높이가 약간 낮음",
+      "aspects": {
+        "aesthetics": 8,
+        "functionality": 7,
+        "innovation": 6
+      }
+    },
+    {
+      "design_id": "design_002",
+      "score": 5.2,
+      "preference_rank": 2,
+      "comments": "균형이 맞지 않음",
+      "aspects": {
+        "aesthetics": 5,
+        "functionality": 6,
+        "innovation": 4
+      }
+    }
+  ],
+  "user_id": "user_123",
+  "session_id": "design_session_001",
+  "timestamp": "2025-06-04T23:15:32Z"
+}
+```
+
+### Python -> Grasshopper 최적화 결과 데이터 형식
+```json
+{
+  "optimized_parameters": [0.55, 0.35, 0.65, 0.25, 0.58],
+  "expected_reward": 8.2,
+  "confidence": 0.85,
+  "session_id": "design_session_001",
+  "iteration": 6
+}
+```
+
+## 강화학습 및 보상 모델 세부 사항
+
+### 보상 모델 학습 과정
+
+1. **데이터 전처리**:
+   - 수집된 피드백 데이터를 정규화하고 증강
+   - 페어와이즈(pairwise) 비교 데이터 생성
+   - 훈련/검증 데이터셋 분할
+
+2. **모델 아키텍처**:
+   - 입력층: 디자인 파라미터 및 메트릭스 (차원: 파라미터 수 + 메트릭스 수)
+   - 은닉층: 3개의 완전 연결 계층 (256, 128, 64 유닛)
+   - 출력층: 단일 스칼라 값 (예측된 보상 점수)
+   - 활성화 함수: ReLU (은닉층), 선형 (출력층)
+
+3. **학습 목표**:
+   - 인간 선호도와 일치하는 보상 함수 학습
+   - Mean Squared Error(MSE) 손실 최소화
+   - Adam 옵티마이저 사용, 학습률: 0.001
+
+### 정책 최적화 과정
+
+1. **PPO 알고리즘 구현**:
+   - 행동 공간: 연속적인 디자인 파라미터
+   - 상태 공간: 현재 디자인 상태 및 제약 조건
+   - 클리핑 파라미터(ε): 0.2
+   - 할인 계수(γ): 0.99
+
+2. **정책 네트워크 아키텍처**:
+   - 액터-크리틱 구조 사용
+   - 액터(정책) 네트워크: 3개의 완전 연결 계층 (128, 64, 32 유닛)
+   - 크리틱(가치) 네트워크: 3개의 완전 연결 계층 (128, 64, 32 유닛)
+   - 출력: 파라미터 분포의 평균 및 표준편차
+
+3. **최적화 과정**:
+   - 학습 배치 크기: 64
+   - 에포크 수: 10 (배치당)
+   - 학습률: 3e-4 (선형 감소 스케줄)
+   - 엔트로피 계수: 0.01 (탐색 장려)
+
+## 설치 및 실행 방법
+
+### 사전 요구 사항
+
+- **소프트웨어**:
+  - Rhinoceros 7 이상
+  - Grasshopper
+  - Python 3.8 이상
+  - Node.js 14 이상
+  - npm 또는 yarn
+
+- **Python 라이브러리**:
+  - PyTorch 1.8 이상
+  - NumPy, SciPy, Pandas
+  - Flask (API 서버용)
+  - Matplotlib (시각화용)
+
+### 의존성 설치
+
 ```bash
-# Core dependencies
-pip install flask zmq gymnasium stable-baselines3 torch werkzeug numpy pandas matplotlib seaborn
+# Python 의존성 설치
+pip install -r requirements.txt
 
-# Additional dependencies for analysis
-pip install scikit-learn
-```
-
-### Installation of C# Components
-1. Open the solution in Visual Studio
-2. Build the project to generate the DLL
-3. Convert the DLL to GHA format using Grasshopper Assembly Utility
-4. Place the GHA file in your Grasshopper Components folder
-
-## Project Structure
-
-```
-/ (root)
-├── data/
-│   ├── designs/     # Stored design parameters and metadata
-│   ├── feedback/    # Human feedback data
-│   ├── meshes/      # 3D mesh exports from Grasshopper
-│   ├── models/      # Trained reinforcement learning models
-│   ├── processed_feedback/  # Processed feedback for reward models
-│   └── zmq_logs/    # Communication logs for debugging
-│
-├── python_modules/
-│   ├── analyze_integrated_data.py  # Analysis tools for RLHF data
-│   ├── design_regenerator.py       # Utility to regenerate optimal designs
-│   ├── enhanced_env.py             # Enhanced RL environment with human feedback
-│   ├── feedback_processor.py       # Process human feedback for reward models
-│   ├── reward_adapter.py           # Adapter for different reward functions
-│   ├── reward_fn_optimized.py      # Optimized architecture reward function
-│   ├── reward_fn_original.py       # Original enhanced reward function
-│   ├── reward_function.py          # Basic seasonal reward function
-│   └── rl_architecture_optimizer.py # Main RL architecture optimization system
-│
-├── server/
-│   ├── app.py                   # Flask server for feedback collection
-│   ├── static/                  # Web UI static assets (JS, CSS)
-│   │   ├── js/
-│   │   │   ├── main.js              # Main application logic
-│   │   │   ├── three_viewer.js      # Three.js 3D viewer 
-│   │   │   ├── design_manager.js    # Design list management
-│   │   │   ├── utils.js             # Utility functions
-│   │   │   └── feedback_form.js     # Feedback form handling
-│   │   └── css/
-│   │       └── styles.css           # Custom stylesheets
-│   └── templates/               # HTML templates for feedback UI
-│       └── index.html           # Main page template
-│
-└── src/                         # C# source code
-    ├── GrasshopperZmqComponent.sln # Visual Studio solution
-    └── GrasshopperZmqComponent/
-        ├── SliderInfoExporter.cs   # Export slider ranges
-        ├── ZmqListener.cs          # Receive actions from Python
-        ├── ZmqStateSender.cs       # Send state/reward to Python
-        └── MeshExporter.cs         # Export 3D mesh data
-```
-
-## Components and Their Functions
-
-### C# Grasshopper Components
-
-1. **SliderInfoExporter**
-   - Exports information about sliders (min, max, rounding values)
-   - Used by the RL environment to understand the action space
-
-2. **ZmqListener**
-   - Receives action arrays from Python via ZMQ
-   - Updates Grasshopper number sliders based on received actions
-
-3. **ZmqStateSender**
-   - Sends current state and reward values to Python
-   - Transmits design state for RL training
-
-4. **MeshExporter**
-   - Exports 3D mesh data from Grasshopper
-   - Provides geometry for visualization in the feedback UI
-
-### Python Modules
-
-1. **rl_architecture_optimizer.py**
-   - Main implementation of the architecture optimization system
-   - Integrates RL environment, ZMQ communication, and reward functions
-
-2. **reward_adapter.py**
-   - Provides a unified interface to different reward functions
-   - Supports switching between original, enhanced, and optimized reward functions
-
-3. **reward_fn_optimized.py**
-   - Optimized reward function based on analysis data
-   - Considers BCR, FAR, seasonal sunlight, and surface-to-volume ratio
-
-4. **enhanced_env.py**
-   - Enhanced Gymnasium environment that integrates human feedback
-   - Combines environmental and human-based rewards
-
-5. **feedback_processor.py**
-   - Processes human feedback data into preference pairs
-   - Prepares training data for reward models
-
-6. **analyze_integrated_data.py**
-   - Analyzes training results and generates reference data
-   - Clusters designs and identifies optimal solutions
-
-7. **design_regenerator.py**
-   - Recreates optimal designs for feedback collection
-   - Sends actions to Grasshopper via ZMQ
-
-### Web Interface (Server)
-
-The feedback collection system is powered by a Flask web application that:
-- Displays 3D models of generated designs using Three.js
-- Provides rating scales for different design aspects (aesthetics, functionality, innovation, feasibility)
-- Collects textual comments and evaluations
-- Manages design exploration and feedback sessions
-
-## RLHF Workflow
-
-### 1. Prepare the Grasshopper Environment
-
-1. Create your parametric design in Grasshopper
-2. Add the RLHF components to your canvas:
-   - SliderInfoExporter: Connect to sliders you want to control
-   - ZmqListener: Set port to 5556 for receiving actions
-   - ZmqStateSender: Set port to 5557 for sending state/reward
-   - MeshExporter: Set port to 5558 for exporting meshes
-
-### 2. Run Reinforcement Learning Training
-
-```bash
-# Start the training with basic PPO algorithm
-python python_modules/rl_architecture_optimizer.py --steps 10000 --bcr-limit 70.0 --far-min 200.0 --far-max 500.0 --use-seasonal-reward
-
-# Options:
-# --steps: Number of training steps
-# --bcr-limit: BCR legal limit (percent)
-# --far-min: Minimum FAR legal limit (percent)
-# --far-max: Maximum FAR legal limit (percent)
-# --use-seasonal-reward: Use seasonal sunlight reward function
-# --reward-type: Choose between "original", "enhanced", or "optimized" reward function
-# --port: ZMQ port for action transmission (default: 5556)
-# --state-port: ZMQ port for state reception (default: 5557)
-```
-
-### 3. Analyze Results and Generate Reference Designs
-
-```bash
-# Analyze the collected data
-python python_modules/analyze_integrated_data.py
-
-# Regenerate top designs for feedback collection
-python python_modules/design_regenerator.py --feedback-session 1
-```
-
-### 4. Collect Human Feedback
-
-```bash
-# Start the feedback server
+# 서버 의존성 설치
 cd server
-python app.py
+npm install
 ```
 
-Then open http://localhost:5000 in your browser to access the feedback interface.
+### Grasshopper 컴포넌트 설치
 
-### 5. Process Feedback and Train Reward Model
+1. `Grasshopper Component` 폴더의 C# 스크립트를 컴파일:
+   ```bash
+   # Visual Studio를 사용하는 경우
+   msbuild RLHFComponent.csproj /p:Configuration=Release
+   
+   # 또는 .NET CLI 사용
+   dotnet build RLHFComponent.csproj -c Release
+   ```
+
+2. DLL을 GHA 파일로 변환:
+   ```bash
+   "C:\Program Files\Rhino 7\Plug-ins\Grasshopper\GrasshopperDeveloperUtils\GhPython.exe" /package RLHFComponent bin\Release\RLHFComponent.dll
+   ```
+
+3. GHA 파일을 Grasshopper 컴포넌트 폴더에 복사:
+   ```bash
+   copy bin\Release\RLHFComponent.gha "%AppData%\Grasshopper\Libraries\"
+   ```
+
+### 서버 실행
 
 ```bash
-# Process collected feedback into preference pairs
-python python_modules/feedback_processor.py
+# 웹 GUI 서버 실행
+cd server
+npm start
 
-# Train reward model (implementation not included)
-# This would use the preference pairs to train a neural network
+# 별도 터미널에서 Python API 서버 실행
+cd rl
+python api_server.py --port 5000
 ```
 
-### 6. Use Enhanced Environment with Reward Model
+### 강화학습 모듈 실행
 
 ```bash
-# Use the enhanced environment with human feedback reward model
-python python_modules/enhanced_env.py --gh-path "path/to/your/definition.gh" --reward-model "path/to/reward_model.pt"
+# 보상 모델 학습
+python rl/train_reward_model.py --data_path data/feedback --model_save_path models/reward
+
+# 정책 최적화
+python rl/train_policy.py --reward_model models/reward/latest.pt --save_path models/policy
 ```
 
-## Reward Functions
+## 파이프라인 실행 예시
 
-The system includes multiple reward functions with different characteristics:
+1. **Grasshopper 설정**:
+   - Rhino 및 Grasshopper 실행
+   - RLHF 컴포넌트를 캔버스에 추가
+   - 디자인 파라미터 입력 및 제약 조건 설정
+   - 컴포넌트 연결 및 초기화
 
-1. **Original Reward Function** (`reward_function.py`)
-   - Basic seasonal reward function
-   - Considers BCR, FAR, summer and winter sunlight
+2. **서버 시작**:
+   - 웹 GUI 서버 실행 (`npm start`)
+   - Python API 서버 실행 (`python api_server.py`)
 
-2. **Enhanced Reward Function** (`reward_fn_original.py`)
-   - Improved stability and training dynamics
-   - Gaussian distribution-based scoring
-   - Reward smoothing for better learning
+3. **초기 디자인 생성**:
+   - Grasshopper에서 "Generate Designs" 버튼 클릭
+   - 초기 파라미터로 디자인 샘플 생성
+   - 생성된 디자인이 웹 GUI에 표시됨
 
-3. **Optimized Reward Function** (`reward_fn_optimized.py`)
-   - Based on analysis of optimal designs
-   - Target ranges derived from data
-   - Includes surface-to-volume ratio
-   - Fine-tuned for architectural quality
+4. **피드백 수집**:
+   - 사용자가 웹 브라우저에서 GUI 접속 (기본: http://localhost:8000)
+   - 제시된 디자인 옵션에 대해 평가 및 피드백 제공
+   - "Submit Feedback" 버튼 클릭하여 데이터 전송
 
-## ZMQ Communication
+5. **모델 학습 및 최적화**:
+   - 수집된 피드백으로 보상 모델 학습
+   - 학습된 보상 모델로 정책 최적화
+   - 최적화된 파라미터 생성
 
-The system uses several ZMQ ports for communication:
+6. **결과 적용**:
+   - 최적화된 파라미터가 Grasshopper로 전송됨
+   - 새로운 디자인이 Grasshopper에서 자동 생성
+   - 결과 시각화 및 평가
 
-- **5556**: Action transmission (Python → Grasshopper)
-- **5557**: State/reward transmission (Grasshopper → Python)
-- **5558**: Mesh data requests (Web UI ↔ Grasshopper)
+7. **반복 과정**:
+   - 필요에 따라 과정 반복 (단계 3-6)
+   - 더 많은 피드백 수집으로 모델 정확도 향상
+   - 디자인 품질 점진적 개선
 
-These can be configured via command-line arguments in the Python scripts.
+## 주요 파일 및 폴더 구조
 
-## Architectural Optimization Parameters
-
-The system optimizes several key architectural parameters:
-
-- **BCR (Building Coverage Ratio)**: Percentage of the site covered by building
-- **FAR (Floor Area Ratio)**: Ratio of total floor area to site area
-- **Winter Sunlight**: Sunlight exposure during winter (higher is better)
-- **Surface-to-Volume Ratio**: Ratio of building surface to volume (lower is better for energy efficiency)
-
-## Troubleshooting
-
-### Common Issues
-
-1. **ZMQ Connection Failures**
-   - Ensure all ports are available and not blocked by firewalls
-   - Check that all components are properly initialized with 'Run' set to True
-   - Verify the address format is correct (e.g., tcp://localhost:5556)
-
-2. **Grasshopper Responsiveness**
-   - If Grasshopper becomes unresponsive, try reducing the step rate
-   - Large models may require more time between actions
-
-3. **Mesh Export Problems**
-   - Ensure your geometry is valid and properly connected to the MeshExporter
-   - Check the server logs for JSON formatting errors
-
-4. **Invalid Designs**
-   - The system includes automatic retry mechanisms for invalid geometries
-   - Ensure your Grasshopper definition produces closed breps
-
-## Extending the System
-
-### Adding Custom Reward Functions
-
-Create a new reward function by implementing:
-1. A class with a `calculate_reward(state)` method
-2. State normalization and scoring logic
-3. Register it in the `reward_adapter.py` file
-
-```python
-# Example:
-class CustomRewardFunction:
-    def __init__(self, params):
-        # Initialize parameters
-        
-    def calculate_reward(self, state):
-        # Calculate reward from state
-        return reward, info
-        
-    def reset_prev_state(self):
-        # Reset internal state
+```
+GH_RLHF/
+│
+├── Grasshopper Component/ - C# 스크립트 및 Grasshopper 컴포넌트
+│   ├── RLHFComponent.cs - 메인 컴포넌트 소스 코드
+│   ├── RLHFComponent.csproj - 프로젝트 파일
+│   └── bin/ - 빌드된 DLL 및 GHA 파일
+│
+├── server/ - 인간 피드백 수집을 위한 웹 서버
+│   ├── public/ - 정적 파일 (HTML, CSS, 이미지)
+│   │   ├── index.html - 메인 인터페이스
+│   │   ├── css/ - 스타일시트
+│   │   └── js/ - 프론트엔드 스크립트
+│   ├── src/ - 서버 소스 코드
+│   │   ├── app.js - Express 서버 설정
+│   │   ├── routes/ - API 라우터
+│   │   └── controllers/ - 요청 처리 로직
+│   └── package.json - 의존성 정보
+│
+├── rl/ - 강화학습 모듈
+│   ├── models/ - 보상 모델 및 정책 모델
+│   │   ├── reward_model.py - 보상 모델 클래스
+│   │   └── policy_model.py - 정책 모델 클래스
+│   ├── utils/ - 유틸리티 함수
+│   │   ├── data_utils.py - 데이터 처리 함수
+│   │   └── visualization.py - 결과 시각화
+│   ├── train.py - 모델 학습 스크립트
+│   ├── api_server.py - Python API 서버
+│   └── config.py - 설정 파일
+│
+├── data/ - 학습 데이터 및 결과
+│   ├── feedback/ - 수집된 인간 피드백 데이터
+│   │   └── *.json - 세션별 피드백 데이터
+│   └── models/ - 학습된 모델 저장소
+│       ├── reward/ - 보상 모델 체크포인트
+│       └── policy/ - 정책 모델 체크포인트
+│
+└── configs/ - 구성 파일
+    ├── rl_config.json - 강화학습 설정
+    ├── model_config.json - 모델 아키텍처 설정
+    └── server_config.json - 서버 설정
 ```
 
-### Creating New Analysis Tools
+## 문제 해결 및 팁
 
-The modular nature of the system allows for custom analysis workflows:
-```python
-# Example of adding a new analysis function
-def analyze_spatial_quality(reference_data):
-    # Your custom analysis code here
-    return spatial_metrics
-```
+- **Grasshopper 연결 오류**: 방화벽 설정 확인 및 포트 허용
+- **모델 수렴 문제**: 학습률 조정 및 배치 크기 최적화
+- **메모리 사용량**: 대규모 모델 학습 시 GPU 메모리 관리
+- **실시간 성능**: 복잡한 디자인의 경우 평가 시간 고려
 
-### Multiple Feedback Sessions
+## 확장 및 개선 방향
 
-For larger studies with multiple participants:
-```bash
-# Create session-specific designs
-python python_modules/design_regenerator.py --feedback-session 2
-```
+- **다양한 보상 모델**: 여러 측면(미학, 기능성, 구조적 안정성 등)을 고려한 다중 보상 모델
+- **메타 학습**: 새로운 디자인 문제에 빠르게 적응하기 위한 메타 학습 구현
+- **하이브리드 접근법**: 규칙 기반 시스템과 학습 기반 시스템의 결합
+- **다중 사용자 피드백**: 여러 전문가의 의견을 통합하는 앙상블 방법
 
-## License
+## 참고 사항
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+- 이 프로젝트는 Rhinoceros 7 및 Grasshopper와 호환됩니다.
+- Python 3.8 이상이 필요합니다.
+- 웹 서버 실행을 위해 Node.js 14 이상이 필요합니다.
+- 복잡한 3D 모델 생성 및 평가에는 고성능 하드웨어가 권장됩니다.
 
-## Acknowledgments
+## 기여 방법
 
-- This system builds on the ZMQ communication framework for Grasshopper
-- PPO implementation based on Stable-Baselines3
-- 3D visualization powered by Three.js
+1. 이 저장소를 포크합니다.
+2. 새로운 기능 브랜치를 생성합니다 (`git checkout -b feature/amazing-feature`).
+3. 변경 사항을 커밋합니다 (`git commit -m 'Add some amazing feature'`).
+4. 브랜치에 푸시합니다 (`git push origin feature/amazing-feature`).
+5. Pull Request를 생성합니다.
