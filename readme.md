@@ -1,6 +1,7 @@
 # GH_RLHF (Grasshopper Reinforcement Learning from Human Feedback)
 
 이 프로젝트는 Grasshopper와 Python 간의 통신을 기반으로 강화학습에서 인간 피드백(RLHF, Reinforcement Learning from Human Feedback)을 구현하는 시스템입니다. 건축 및 디자인 분야에서 파라메트릭 모델링과 인공지능을 결합하여 더 나은 설계 결과를 도출합니다.
+또한, 이 프로젝트는 2025년 성균관대학교 공과대학 글로벌스마트시티 융합전공 및 DesignInformaticsGroup(DIG) 소속 양승원 박사과정의 학위논문의 주요 연구 개발의 결과물입니다.
 
 ## 프로젝트 개요
 
